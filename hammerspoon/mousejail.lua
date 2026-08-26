@@ -1,27 +1,23 @@
 -- mousejail: supervises the mousejail helper (built from main.swift), which
 -- confines the cursor to a game's window while it is frontmost. The helper
--- watches game focus and window geometry itself; this file only starts and
--- stops it, and running it as a Hammerspoon child lets it inherit
--- Hammerspoon's Accessibility grant. cmd+alt+L toggles. A helper that dies
--- abnormally triggers an automatic cursor release, so a crash mid-capture
--- cannot leave the cursor frozen.
+-- watches focus and geometry itself, this file only starts and stops it.
+-- Running it as a Hammerspoon child inherits Hammerspoon's Accessibility
+-- grant. cmd+alt+L toggles. An abnormal helper death triggers an automatic
+-- cursor release, so a crash mid-capture cannot leave the cursor frozen.
 
 local HELPER = hs.configdir .. "/mousejail/mousejail"
 local SETTING = "mousejailEnabled"
--- Bundle id of the game to confine the cursor to; nil uses the helper's
--- default (League of Legends's game client).
+-- Bundle id of the game, nil uses the helper's default (League of Legends).
 local BUNDLE = nil
 
 local M = { task = nil, enabled = hs.settings.get(SETTING) ~= false }
 
 local function start()
   if M.task and M.task:isRunning() then return end
-  -- Kill any helper orphaned by a previous Hammerspoon exit (it would
-  -- double-process every mouse event alongside the new instance) and wait for
-  -- it to actually die: cursor association is global last-writer-wins state,
-  -- so a dying predecessor's cleanup would undo the successor's capture. The
-  -- pattern is anchored so a compiler or editor holding the path in its argv
-  -- is not killed too.
+  -- Kill any helper orphaned by a previous Hammerspoon exit and wait for it
+  -- to die: cursor association is global last-writer-wins state, and a dying
+  -- predecessor's cleanup would undo the successor's capture. The anchored
+  -- pattern spares compilers or editors holding the path in their argv.
   hs.execute("pkill -f '^" .. HELPER .. "( |$)'")
   for _ = 1, 20 do
     if hs.execute("pgrep -f '^" .. HELPER .. "( |$)'") == "" then break end
@@ -32,8 +28,8 @@ local function start()
     -- a stale callback from a superseded task must not clobber the live one
     if M.task == t then M.task = nil end
     if exitCode ~= 0 then
-      -- an abnormal death (crash, SIGKILL) can skip the helper's own cleanup
-      -- and leave the cursor disconnected; --release restores it
+      -- a crash can skip the helper's cleanup and leave the cursor
+      -- disconnected, --release restores it
       hs.task.new(HELPER, nil, { "--release" }):start()
       local detail = (stdErr and #stdErr > 0) and stdErr:gsub("%s+$", "")
           or ("exit code " .. exitCode)
