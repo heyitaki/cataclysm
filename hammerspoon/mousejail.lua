@@ -9,6 +9,9 @@ local HELPER = hs.configdir .. "/mousejail/mousejail"
 local SETTING = "mousejailEnabled"
 -- Bundle id of the game, nil uses the helper's default (League of Legends).
 local BUNDLE = nil
+-- Corner radius of the game window in points, nil uses the helper's default.
+-- Too large only costs reachable corner area, too small leaves a way out.
+local RADIUS = nil
 
 local M = { task = nil, enabled = hs.settings.get(SETTING) ~= false }
 
@@ -23,6 +26,12 @@ local function start()
     if hs.execute("pgrep -f '^" .. HELPER .. "( |$)'") == "" then break end
     hs.timer.usleep(20000)
   end
+  local args = {}
+  if BUNDLE then table.insert(args, BUNDLE) end
+  if RADIUS then
+    table.insert(args, "--corner-radius")
+    table.insert(args, tostring(RADIUS))
+  end
   local t
   t = hs.task.new(HELPER, function(exitCode, _, stdErr)
     -- a stale callback from a superseded task must not clobber the live one
@@ -35,7 +44,7 @@ local function start()
           or ("exit code " .. exitCode)
       hs.alert.show("mousejail: " .. detail)
     end
-  end, BUNDLE and { BUNDLE } or {})
+  end, args)
   if not t or t:start() == false then
     hs.alert.show("mousejail failed to launch")
     return
