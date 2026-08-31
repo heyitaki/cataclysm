@@ -2,6 +2,8 @@
 
 Spec for absorbing UnnaturalScrollWheels-class functionality into the mousejail codebase. Status: approved for implementation, phased.
 
+`distribution-and-ui.md` supersedes this document's "Settings and UI" and "Build and packaging" sections and splits its phase 3 into 3a and 3b. Where the two disagree, that one wins; its "What changes" table lists every difference. Everything else here still stands.
+
 ## Goal
 
 One macOS utility that owns three pointer behaviors:
@@ -29,7 +31,7 @@ The immediate driver is replacing UnnaturalScrollWheels, which is currently inst
 | Repo shape | One binary, feature flags, in the mousejail repo, renamed in phase 3 | One Accessibility grant, one process, shared tap lifecycle code |
 | Scroll speed model | Fixed lines per notch, then a float multiplier | Needs a fractional remainder accumulator |
 | Acceleration scope | Off always, while the process runs | Set at launch, restore on exit |
-| Configuration | Menu bar app with a preferences window | Forces an .app bundle, retires the Hammerspoon supervisor |
+| Configuration | Menu bar app with a preferences window | Forces an .app bundle, retires the Hammerspoon supervisor. Superseded: one `MenuBarExtra(.window)` panel, no preferences window |
 
 Two taps, not one. The user-facing decision was one binary, which does not require one event tap. mousejail's tap is head-insert and the scroll tap should be tail-append so it sees whatever Logitech Options or similar produced and gets the last word. `CGEvent.tapCreate` takes a single placement, so combining them would force one of the two to change placement for no benefit. Two `CFMachPort`s on the same main run loop in the same process costs nothing and keeps each feature's placement independent. Their masks are disjoint, so they never see the same event.
 
@@ -221,6 +223,8 @@ Watch for one interaction: the jail warps the cursor and compensates for warp di
 
 ## Settings and UI
 
+Superseded by `distribution-and-ui.md` "The dropdown". The bounds table below still holds; the UI shape, the settings list, and the macOS floor do not.
+
 `MenuBarExtra` plus a `Settings` scene, SwiftUI. Verified to compile and link with `xcrun swiftc -O App.swift main.swift`, with `App.main()` called explicitly from `main.swift`. `MenuBarExtra` is macOS 13; opening the preferences window from the menu with `SettingsLink` raises the floor to macOS 14, and the pre-14 `NSApp.sendAction(Selector(("showSettingsWindow:")))` also compiles against a 13 target. On a 26.3 machine either works, so use `SettingsLink`. This is roughly 80 lines against roughly 200 for the equivalent programmatic AppKit, and it does not require a storyboard or an Xcode project.
 
 Menu: jail on/off, invert scroll on/off, acceleration off on/off, Preferences, Quit.
@@ -240,6 +244,8 @@ Numeric settings are bounded at both ends, and the bound is enforced on the valu
 Both bounds matter for behavior, not just for hygiene: zero for either setting swallows every scroll event with no error shown, a non-finite multiplier reaches an `Int64` conversion that terminates the process, and an unbounded product overflows into the same crash.
 
 ## Build and packaging
+
+Superseded by `distribution-and-ui.md` "Packaging", which keeps the signing argument below and adds the DMG, notarization, and universal-binary decisions.
 
 Keep the Makefile and `swiftc`. Assemble the `.app` bundle by hand: `Contents/MacOS/<binary>`, `Contents/Info.plist` with `LSUIElement` set, `Contents/Resources` for the icon.
 
@@ -278,9 +284,9 @@ For `SIGKILL`, bundle a LaunchAgent plist in `Contents/Library/LaunchAgents/` an
 
 The design that survives all four is a **separate recovery job**, not the app itself: the same binary registered as a KeepAlive agent running with a `--watch` flag, which starts no UI, installs no tap, and does nothing but notice that no jailing instance is alive and call `CGAssociateMouseAndMouseCursorPosition(1)` once. It is then free to run at login always, it is unaffected by quitting the app, and it covers a Finder-launched instance as well as a login-launched one. This is the job the Hammerspoon supervisor does today, kept rather than dissolved into the app; launch at login for the app itself becomes an ordinary `SMAppService.mainApp` login item, independent of it.
 
-The alternative, folding recovery into the app and accepting that recovery requires launch at login, is acceptable only if the preferences window says so plainly on the same line as the setting. Pick one before phase 3 rather than discovering the coupling during it.
+Decided: `distribution-and-ui.md` "Crash recovery and the watcher" adopts the separate `--watch` job and details it. The alternative, folding recovery into the app and accepting that recovery requires launch at login, is not taken.
 
-Whichever is chosen, test the four scenarios that distinguish them: `SIGKILL` while the jail holds the cursor, `SIGKILL` after a Finder launch, deliberate Quit, and launch at login turned off. Registration can also fail (consent, signing, placement), so handle the error rather than assuming the agent is live.
+Test the four scenarios that distinguish the two shapes: `SIGKILL` while the jail holds the cursor, `SIGKILL` after a Finder launch, deliberate Quit, and launch at login turned off. Registration can also fail (consent, signing, placement), so handle the error rather than assuming the agent is live.
 
 The jail hotkey moves in-app via Carbon `RegisterEventHotKey`, which needs no additional permission.
 
@@ -293,7 +299,7 @@ Ordered so the non-negotiables ship before the packaging work, which is the long
 | 0 | Split `main.swift` into modules, extract `TapHost`, add the scroll-field test harness. No behavior change, still CLI under Hammerspoon, binary still named `mousejail`. | 1h |
 | 1 | Pointer acceleration, behind a CLI flag. | 1h |
 | 2 | Scroll filter, behind CLI flags. Both non-negotiables now working. | 2-4h |
-| 3 | App bundle, menu bar, preferences, login item, hotkey. Rename the binary and repo. Retire the Hammerspoon lua. | 3-4h |
+| 3 | App bundle, menu bar, preferences, login item, hotkey. Rename the binary and repo. Retire the Hammerspoon lua. Split into 3a and 3b by `distribution-and-ui.md` "Phasing". | 3-4h |
 
 **The rename moved to phase 3.** Phases 0 through 2 still run under the Hammerspoon supervisor, and `hammerspoon/mousejail.lua` hardcodes the helper as `hs.configdir .. "/mousejail/mousejail"` and kills orphans with the anchored pattern `^<HELPER>( |$)`, while the Makefile `install` target hardcodes `$(HS_DIR)/mousejail/mousejail` and `$(HS_DIR)/mousejail.lua`. Renaming in phase 0 leaves the supervisor launching a path that no longer exists, so phase 0 would not leave a working program. Phase 3 retires the lua anyway, which is where the rename costs nothing.
 
@@ -347,8 +353,6 @@ Jail: existing behavior in League windowed mode, plus a check that acceleration 
 **Swallowed scroll events.** Returning nil for a zero-emit event is correct but means a low multiplier can make scrolling feel dead. The residue accumulator prevents this only for sustained motion in one direction; a single residue reset on every reversal makes alternating scrolling at any multiplier below 1 emit nothing at all, forever, which is why residue is a per-direction pair. Verify at multiplier 0.3 that scrolling still moves both in a sustained direction and while alternating. The same-direction check alone passes with the bug present.
 
 ## Open
-
-**Name.** The repo is `mousejail`, which no longer describes the scope. Default proposal `mousetamer`, alternatives `mouseworks` or `micetrap`. The rename is mechanical and GitHub redirects the old URL, so this blocks nothing; it lands in phase 3 with the Hammerspoon retirement.
 
 **Accelerated and raw delta fields.** `scrollWheelEventAcceleratedDeltaAxis{1,2}` and `scrollWheelEventRawDeltaAxis{1,2}` exist and both read 0 on synthesized events. Whether the HID stream populates them on real wheel events, and whether any application reads them, is unmeasured. Check with `--dump-scroll` in phase 2; if they carry values, the rewrite has to decide about them, since leaving them at their originals is the same class of inconsistency this design set out to remove.
 
