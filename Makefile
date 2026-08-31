@@ -2,6 +2,10 @@ BINARY = mousejail
 HS_DIR = $(HOME)/.hammerspoon
 DEST = $(HS_DIR)/mousejail/$(BINARY)
 
+# A build killed mid-link must not leave a fresh-mtime artifact that the next
+# run treats as up to date.
+.DELETE_ON_ERROR:
+
 $(BINARY): main.swift
 	xcrun swiftc -O main.swift -o $(BINARY)
 
@@ -35,7 +39,15 @@ restart: install
 	done; \
 	echo "helper did not restart; press cmd+alt+L twice"; exit 1
 
+test: build/scrollfilter-tests
+	./build/scrollfilter-tests
+
+build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
+	mkdir -p build
+	xcrun swiftc -O ScrollFilter.swift tests/ScrollFilterTests.swift -o $@
+
 clean:
 	rm -f $(BINARY)
+	rm -rf build
 
-.PHONY: install restart clean
+.PHONY: install restart test clean
