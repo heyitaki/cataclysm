@@ -22,6 +22,8 @@ make install
 
 Add `require("mousejail")` to `~/.hammerspoon/init.lua` and reload. Hammerspoon needs the Accessibility permission. `cmd+alt+L` toggles.
 
+Later rebuilds want `make restart`, which installs and then reloads Hammerspoon so the running helper is replaced. Copying the binary alone leaves the old one running, so a plain `make install` is tested against the previous build. That target drives Hammerspoon through its `hs` command line tool, which needs `require("hs.ipc")` in `init.lua`; without it, restart the helper by pressing `cmd+alt+L` twice.
+
 ## Another game
 
 ```
