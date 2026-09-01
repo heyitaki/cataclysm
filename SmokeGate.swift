@@ -73,6 +73,10 @@ final class SmokeGate {
                        + "before running the gate")
         else { return 1 }
         if smAppServicePath() {
+            guard noTraceLeft() else {
+                print("SMOKE FAIL")
+                return 1
+            }
             print("SMOKE PASS (SMAppService)")
             return 0
         }
@@ -90,11 +94,41 @@ final class SmokeGate {
             return 1
         }
         if legacyPath() {
+            guard noTraceLeft() else {
+                print("SMOKE FAIL")
+                return 1
+            }
             print("SMOKE PASS (legacy bootstrap; SMAppService refused)")
             return 0
         }
         print("SMOKE FAIL")
         return 1
+    }
+
+    // The last step on either path. BTM keys launch items by label, so the
+    // legacy plist written under the shared label re-enables the SMAppService
+    // agent's record (left behind by a register() that spawn-failed), and smd
+    // re-submits that job to launchd within a second of the legacy bootout
+    // freeing the label: the agent reads .enabled and runs while every
+    // earlier step reported PASS. So the verdict is taken from the end
+    // state, polled for 3s with the agent unregistered again whenever it
+    // comes back.
+    private func noTraceLeft() -> Bool {
+        var enabled = true
+        var loaded = true
+        for _ in 0..<6 {
+            if agent.status == .enabled {
+                smRegistered = true
+                cleanupSM()
+            }
+            enabled = agent.status == .enabled
+            loaded = runLaunchctl(["print", "gui/\(getuid())/\(watcherLabel)"]).code == 0
+            usleep(500_000)
+        }
+        return step("no watcher left behind", !enabled && !loaded,
+                    detail: enabled
+                        ? "the SMAppService agent is registered again (BTM label collision)"
+                        : "the job is still loaded in launchd")
     }
 
     // Prints the step's line; detail reaches the line only on failure.
@@ -121,22 +155,10 @@ final class SmokeGate {
         // the job ("program identifier = Contents/MacOS/cataclysm", "resolve
         // program"), so resolution is proven by whichever appears first: the
         // absolute path in the dump, or the spawned pid's true executable
-        // (proc_pidpath) matching the in-bundle path. KeepAlive's
-        // SuccessfulExit key implies RunAtLoad (launchd.plist(5)), so the
-        // watcher spawns on registration; poll to cover the spawn latency.
-        var printCode: Int32 = -1
-        var output = ""
-        var resolved = false
-        for _ in 0..<20 {
-            (printCode, output) = runLaunchctl(
-                ["print", "gui/\(getuid())/\(watcherLabel)"])
-            if printCode == 0 {
-                resolved = smokeResolution(output: output,
-                                           executablePath: executablePath,
-                                           pathForPid: processPath)
-                if resolved { break }
-            }
-            usleep(500_000)
+        // (proc_pidpath) matching the in-bundle path.
+        let (printCode, output, resolved) = pollLaunchctlPrint(label: watcherLabel) {
+            smokeResolution(output: $0, executablePath: executablePath,
+                            pathForPid: executablePath(ofPid:))
         }
         guard step("launchctl print shows the job", printCode == 0,
                    detail: "exit \(printCode): \(firstLine(of: output))")
@@ -181,15 +203,19 @@ final class SmokeGate {
         guard step("bootstrap legacy job", bootCode == 0,
                    detail: "exit \(bootCode): \(firstLine(of: bootOutput))")
         else { return false }
-        let (code, output) = runLaunchctl(
-            ["print", "gui/\(getuid())/\(watcherLabel)"])
+        // The legacy dump always echoes the absolute ProgramArguments path,
+        // so only a live pid running that executable proves launchd ran the
+        // job rather than merely loaded it (spec: the fallback is "measured
+        // to run, not merely to load").
+        let (code, output, spawned) = pollLaunchctlPrint(label: watcherLabel) {
+            launchctlPidResolvesExecutable($0, executablePath: executablePath,
+                                           pathForPid: executablePath(ofPid:))
+        }
         guard step("launchctl print shows the legacy job", code == 0,
                    detail: "exit \(code): \(firstLine(of: output))")
         else { return false }
-        guard step("legacy executable resolved inside the bundle",
-                   launchctlOutputResolvesExecutable(output,
-                                                     executablePath: executablePath),
-                   detail: "expected \(executablePath); launchd has "
+        guard step("legacy job spawned the in-bundle executable", spawned,
+                   detail: "expected a pid running \(executablePath); launchd has "
                        + programLines(of: output))
         else { return false }
         let (outCode, outOutput) = runLaunchctl(
@@ -261,16 +287,6 @@ final class SmokeGate {
             src.resume()
             signalSources.append(src) // a released source stops firing
         }
-    }
-
-    // The true executable of a running process, from the kernel rather than
-    // argv (the watcher's argv[0] is the bare "cataclysm" the plist carries).
-    private func processPath(_ pid: Int32) -> String? {
-        // PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN); the macro itself does
-        // not import into Swift.
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return String(cString: buffer)
     }
 
     private func firstLine(of output: String) -> String {

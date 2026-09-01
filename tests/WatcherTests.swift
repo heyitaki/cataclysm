@@ -109,18 +109,33 @@ struct WatcherTests {
     }
 
     static func registrationPlanTests() {
-        checkEq(watcherRegistrationPlan(statusEnabled: false, versionChanged: true),
+        checkEq(watcherRegistrationPlan(statusEnabled: false, legacyCurrent: false,
+                                        versionChanged: true),
                 WatcherRegistrationPlan(unregisterFirst: false, register: true),
                 "never registered: register without unregistering")
-        checkEq(watcherRegistrationPlan(statusEnabled: true, versionChanged: true),
+        checkEq(watcherRegistrationPlan(statusEnabled: true, legacyCurrent: false,
+                                        versionChanged: true),
                 WatcherRegistrationPlan(unregisterFirst: true, register: true),
                 "version change on an enabled agent: unregister then register")
-        checkEq(watcherRegistrationPlan(statusEnabled: true, versionChanged: false),
+        checkEq(watcherRegistrationPlan(statusEnabled: true, legacyCurrent: false,
+                                        versionChanged: false),
                 WatcherRegistrationPlan(unregisterFirst: false, register: false),
                 "same version, enabled: leave it alone")
-        checkEq(watcherRegistrationPlan(statusEnabled: false, versionChanged: false),
+        checkEq(watcherRegistrationPlan(statusEnabled: false, legacyCurrent: false,
+                                        versionChanged: false),
                 WatcherRegistrationPlan(unregisterFirst: false, register: true),
-                "same version but not enabled: register")
+                "same version but nothing loaded: register")
+        // The legacy job is the active mechanism on a machine SMAppService
+        // refuses; agent.status never reads enabled there, and re-registering
+        // every launch would boot the working job out first.
+        checkEq(watcherRegistrationPlan(statusEnabled: false, legacyCurrent: true,
+                                        versionChanged: false),
+                WatcherRegistrationPlan(unregisterFirst: false, register: false),
+                "same version, legacy job current: leave it alone")
+        checkEq(watcherRegistrationPlan(statusEnabled: false, legacyCurrent: true,
+                                        versionChanged: true),
+                WatcherRegistrationPlan(unregisterFirst: false, register: true),
+                "version change on a legacy job: register (SMAppService retried)")
     }
 
     // The runtime and the smoke gate both consume these; a drift here would

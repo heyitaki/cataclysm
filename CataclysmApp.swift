@@ -156,6 +156,10 @@ final class AppRuntime {
     private var pickerObservers: [NSObjectProtocol] = []
     private var onboarding: OnboardingController?
     private var signalSources: [DispatchSourceSignal] = []
+    // Stamps the background spawn check a registration starts; bumped by
+    // every registration and reset so a stale result cannot act on a job
+    // that has since been replaced or torn down.
+    private var watcherProbeGeneration = 0
 
     private init() {
         let base = FileManager.default.urls(
@@ -434,10 +438,12 @@ final class AppRuntime {
     // changes the executable.
     private func registerWatcher() {
         guard let settings else { return }
+        watcherProbeGeneration += 1
         let agent = SMAppService.agent(plistName: watcherPlistName)
         let version = appVersion()
         let plan = watcherRegistrationPlan(
             statusEnabled: agent.status == .enabled,
+            legacyCurrent: legacyWatcherCurrent(),
             versionChanged: needsWatcherReregistration(
                 lastRegistered: settings.lastRegisteredVersion, current: version))
         if plan.unregisterFirst {
@@ -475,6 +481,7 @@ final class AppRuntime {
                 try agent.register()
                 settings.lastRegisteredVersion = version
                 state.watcherError = nil
+                verifyWatcherSpawn(generation: watcherProbeGeneration)
             } catch {
                 // register() also throws while the agent sits in Login
                 // Items awaiting approval or switched off there. That is
@@ -498,6 +505,58 @@ final class AppRuntime {
         }
         reconcileLegacyWatcherIfMoved()
         refreshWatcherStatus()
+    }
+
+    // SMAppService can accept a registration launchd then never runs: under
+    // the self-signed identity register() succeeds and status reads .enabled,
+    // but launchd fails every spawn ("Unable to get updated LWCR", because
+    // BTM ignores the plist's bundle identifiers for an executable with no
+    // Team ID) and throttles the respawns. A hollow registration is no crash
+    // recovery, so the runtime makes the smoke gate's check too, off the
+    // main thread because the hollow case blocks for the full window. On
+    // non-spawn the agent is unregistered and the legacy job installed in
+    // its place; a failed unregister is surfaced instead, since the legacy
+    // job cannot take the label while the agent still holds it. The
+    // generation stamp drops a result that lands after a later registration
+    // or a reset changed what is loaded.
+    private func verifyWatcherSpawn(generation: Int) {
+        let label = legacyWatcherLabel
+        let executable = watcherExecutablePath
+        DispatchQueue.global().async {
+            let probe = pollLaunchctlPrint(label: label) {
+                smokeResolution(output: $0, executablePath: executable,
+                                pathForPid: executablePath(ofPid:))
+            }
+            DispatchQueue.main.async { [self] in
+                guard generation == watcherProbeGeneration, !probe.resolved else { return }
+                do {
+                    try SMAppService.agent(plistName: watcherPlistName).unregister()
+                } catch {
+                    state.watcherError = "Crash recovery failed: the registered "
+                        + "watcher never started and could not be unregistered: "
+                        + error.localizedDescription
+                    refreshWatcherStatus()
+                    return
+                }
+                if let failure = installLegacyWatcher() {
+                    state.watcherError = "Crash recovery failed: the registered "
+                        + "watcher never started; \(failure)"
+                } else {
+                    state.watcherError = nil
+                }
+                refreshWatcherStatus()
+            }
+        }
+    }
+
+    // The legacy job counts as the active mechanism only when launchd has it
+    // loaded and its stored path is this bundle's: a moved bundle or a plist
+    // whose bootstrap failed falls through to registration instead.
+    private func legacyWatcherCurrent() -> Bool {
+        guard let data = try? Data(contentsOf: legacyWatcherPlistURL),
+              legacyWatcherExecutablePath(inPlistData: data) == watcherExecutablePath
+        else { return false }
+        return legacyWatcherLoaded()
     }
 
     // Writes the legacy plist with the current absolute executable path and
@@ -769,12 +828,22 @@ final class AppRuntime {
     // Every step is idempotent, so a retry only redoes what failed.
     func resetEverythingAndQuit() {
         var remaining: [String] = []
+        // A spawn check still polling must not re-install a watcher after
+        // this teardown.
+        watcherProbeGeneration += 1
         // disable(), not restore(): the steps below spin the main run loop
         // (waitUntilExit in runLaunchctl), and a reassert tick landing there
         // would re-take the property right before its stored original is
         // erased.
-        if let pointerAccel, !pointerAccel.disable() {
-            remaining.append("pointer acceleration could not be restored")
+        if let pointerAccel {
+            if pointerAccel.disable() {
+                // The property is back to its original. Said here so the
+                // panel stays truthful when a later step fails and the
+                // re-take below is skipped (ungranted, or features down).
+                state.accelHeld = false
+            } else {
+                remaining.append("pointer acceleration could not be restored")
+            }
         }
         CGAssociateMouseAndMouseCursorPosition(1)
         let agent = SMAppService.agent(plistName: watcherPlistName)

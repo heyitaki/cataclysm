@@ -75,17 +75,21 @@ func needsWatcherReregistration(lastRegistered: String?, current: String) -> Boo
 // What registerWatcher must do, decided from one status snapshot: an enabled
 // agent on a version change is unregistered first (SMAppService may not
 // launch an agent whose executable changed otherwise), and registration runs
-// unless the same version is already enabled. Pure so the sequencing that
-// crash recovery depends on is pinned by tests.
+// unless the same version is already loaded by either mechanism. The legacy
+// job counts (legacyCurrent: loaded, and its stored path is this bundle's)
+// because agent.status never reads enabled on a machine SMAppService
+// refuses, and registering anyway would boot the working job out on every
+// launch. Pure so the sequencing crash recovery depends on is pinned by
+// tests.
 struct WatcherRegistrationPlan: Equatable {
     let unregisterFirst: Bool
     let register: Bool
 }
 
-func watcherRegistrationPlan(statusEnabled: Bool,
+func watcherRegistrationPlan(statusEnabled: Bool, legacyCurrent: Bool,
                              versionChanged: Bool) -> WatcherRegistrationPlan {
     WatcherRegistrationPlan(unregisterFirst: statusEnabled && versionChanged,
-                            register: !statusEnabled || versionChanged)
+                            register: !(statusEnabled || legacyCurrent) || versionChanged)
 }
 
 // MARK: - Shared job derivations
@@ -121,6 +125,35 @@ func runLaunchctl(_ arguments: [String]) -> (code: Int32, output: String) {
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
     proc.waitUntilExit()
     return (proc.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+}
+
+// Polls `launchctl print` for the job until `resolved` accepts a dump or the
+// 10s window (20 x 0.5s) runs out. KeepAlive's SuccessfulExit key implies
+// RunAtLoad (launchd.plist(5)), so a job launchd accepted spawns on
+// registration; the poll covers the spawn latency. Shared by the smoke gate
+// and the runtime's post-registration spawn check so both measure the same
+// thing. Blocks for the whole window when the job never spawns.
+func pollLaunchctlPrint(label: String,
+                        resolved: (String) -> Bool) -> (code: Int32, output: String,
+                                                        resolved: Bool) {
+    var code: Int32 = -1
+    var output = ""
+    for attempt in 0..<20 {
+        (code, output) = runLaunchctl(["print", "gui/\(getuid())/\(label)"])
+        if code == 0, resolved(output) { return (code, output, true) }
+        if attempt < 19 { usleep(500_000) }
+    }
+    return (code, output, false)
+}
+
+// The true executable of a running process, from the kernel rather than argv
+// (the watcher's argv[0] is the bare "cataclysm" the bundled plist carries).
+func executablePath(ofPid pid: Int32) -> String? {
+    // PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN); the macro itself does not
+    // import into Swift.
+    var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+    guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return String(cString: buffer)
 }
 
 // The legacy job's plist. Two deliberate differences from the bundled

@@ -27,6 +27,7 @@ struct SmokeTests {
         stepLineTests()
         resolutionTests()
         combinedResolutionTests()
+        spawnResolutionTests()
         pidTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
@@ -120,6 +121,36 @@ struct SmokeTests {
         checkEq(smokeResolution(output: unspawned, executablePath: exec,
                                 pathForPid: { _ in exec }),
                 false, "no pid and no absolute path never resolves")
+    }
+
+    // The spawn half alone, which the legacy branch relies on: that job's dump
+    // always carries its absolute ProgramArguments path, so the path check
+    // proves only that launchd loaded the definition, never that it ran it.
+    static func spawnResolutionTests() {
+        let exec = "/Applications/Cataclysm.app/Contents/MacOS/cataclysm"
+        let loadedOnly = """
+        io.github.heyitaki.cataclysm.watch = {
+        \targuments = {
+        \t\t\(exec)
+        \t\t--watch
+        \t}
+        \tstate = not running
+        }
+        """
+        let running = loadedOnly.replacingOccurrences(
+            of: "state = not running", with: "pid = 512")
+        checkEq(launchctlPidResolvesExecutable(loadedOnly, executablePath: exec,
+                                               pathForPid: { _ in exec }),
+                false, "the absolute path alone does not prove a spawn")
+        checkEq(launchctlPidResolvesExecutable(running, executablePath: exec,
+                                               pathForPid: { $0 == 512 ? exec : nil }),
+                true, "a live pid running the in-bundle executable resolves")
+        checkEq(launchctlPidResolvesExecutable(running, executablePath: exec,
+                                               pathForPid: { _ in "/usr/bin/true" }),
+                false, "a pid running something else does not resolve")
+        checkEq(launchctlPidResolvesExecutable(running, executablePath: "",
+                                               pathForPid: { _ in "" }),
+                false, "empty expected path never resolves")
     }
 
     static func pidTests() {

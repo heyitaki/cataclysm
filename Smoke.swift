@@ -39,14 +39,24 @@ func launchctlPid(inOutput output: String) -> Int32? {
     return nil
 }
 
-// The gate's whole resolution decision: the absolute path in the dump, or a
-// live pid whose true executable (pathForPid, proc_pidpath in production)
-// matches the in-bundle path. Either proves launchd resolved the executable.
+// A live pid whose true executable (pathForPid, proc_pidpath in production)
+// matches the in-bundle path: proof that launchd ran the program, not only
+// that it loaded the definition. The legacy job's dump always carries its
+// absolute ProgramArguments path, so this is the only check that means
+// anything for that job. An empty expected path can never count as resolved.
+func launchctlPidResolvesExecutable(_ output: String, executablePath: String,
+                                    pathForPid: (Int32) -> String?) -> Bool {
+    guard !executablePath.isEmpty,
+          let pid = launchctlPid(inOutput: output) else { return false }
+    return pathForPid(pid) == executablePath
+}
+
+// The SMAppService resolution decision: the absolute path in the dump, or a
+// live pid running the in-bundle executable. Either proves launchd resolved
+// BundleProgram inside the bundle.
 func smokeResolution(output: String, executablePath: String,
                      pathForPid: (Int32) -> String?) -> Bool {
-    if launchctlOutputResolvesExecutable(output, executablePath: executablePath) {
-        return true
-    }
-    guard let pid = launchctlPid(inOutput: output) else { return false }
-    return pathForPid(pid) == executablePath
+    launchctlOutputResolvesExecutable(output, executablePath: executablePath)
+        || launchctlPidResolvesExecutable(output, executablePath: executablePath,
+                                          pathForPid: pathForPid)
 }
