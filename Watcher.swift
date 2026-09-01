@@ -22,12 +22,12 @@ func watcherShouldRelease(previous: Bool?, present: Bool) -> Bool {
 let watcherFlag = "--watch"
 
 // The watcher is the same bundle as the app, so a running-applications query
-// by bundle id could return the watcher itself, or a second watcher alive
-// beside it (the legacy job and the SMAppService agent overlap whenever a
-// legacy teardown fails). Counting any watcher would make the app look
-// present forever and every release would be skipped, so only a process not
-// running under --watch counts as the app. The own-PID check is a shortcut
-// that also holds when the kernel refuses the argument read.
+// by bundle id could return the watcher itself, or a second watcher process
+// (one launchd is still reaping while its replacement starts). Counting any
+// watcher would make the app look present forever and every release would be
+// skipped, so only a process not running under --watch counts as the app. The
+// own-PID check is a shortcut that also holds when the kernel refuses the
+// argument read.
 func watcherSeesApp(runningPIDs: [pid_t], ownPID: pid_t,
                     argumentsOf: (pid_t) -> [String]) -> Bool {
     runningPIDs.contains { $0 != ownPID && !argumentsOf($0).contains(watcherFlag) }

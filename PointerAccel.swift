@@ -135,10 +135,13 @@ final class PointerAccel {
         }
     }
 
-    // Stop holding the property and put the original back.
-    func disable() {
+    // Stop holding the property and put the original back. Returns
+    // restore()'s verdict: false means the property still reads -1 with the
+    // write of the original failed, and the owner must keep this instance for
+    // a later retry rather than drop it.
+    func disable() -> Bool {
         dispatchPrecondition(condition: .onQueue(.main))
-        teardown()
+        return teardown()
     }
 
     // Safe on any exit path: acts only while this instance holds the
@@ -181,14 +184,15 @@ final class PointerAccel {
         teardown()
     }
 
-    private func teardown() {
+    @discardableResult
+    private func teardown() -> Bool {
         timer?.invalidate()
         timer = nil
         if let o = wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(o)
             wakeObserver = nil
         }
-        restore()
+        return restore()
     }
 
     private func reassert() {

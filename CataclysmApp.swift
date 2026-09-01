@@ -330,7 +330,14 @@ final class AppRuntime {
     }
 
     private func startAcceleration() {
-        guard pointerAccel == nil else { return }
+        // An instance kept alive by a failed disable() (setAccelerationOff)
+        // is re-enabled rather than replaced, so its claim and stored
+        // original carry over. enable() is idempotent for a live instance.
+        if let pointerAccel {
+            pointerAccel.enable()
+            state.accelHeld = true
+            return
+        }
         let accel = PointerAccel()
         accel.onWriteHealthChange = { [weak self] healthy in
             self?.state.accelWriteFailing = !healthy
@@ -415,16 +422,25 @@ final class AppRuntime {
             }
         }
         if plan.register {
+            // The legacy job and the SMAppService agent share one launchd
+            // label (spec: the fallback is "the same job"), so launchd holds
+            // at most one of them and `bootout` on that label unloads
+            // whichever is loaded. A legacy job left over from a build
+            // SMAppService refused therefore has to go before register()
+            // claims the label; booting it out afterwards would unload the
+            // agent just registered and leave no watcher until next login
+            // while status still read .enabled. A job that cannot be booted
+            // out keeps recovering on its own; surface the failure and leave
+            // the recorded version alone so the next launch retries.
+            if let failure = bootOutLegacyWatcher() {
+                state.watcherError = "Crash recovery update failed: " + failure
+                refreshWatcherStatus()
+                return
+            }
             do {
                 try agent.register()
                 settings.lastRegisteredVersion = version
                 state.watcherError = nil
-                // A legacy job left over from a build SMAppService refused is
-                // now redundant. A teardown failure is not surfaced: the
-                // watcher counts only processes not under --watch as the app, so
-                // two watchers still recover correctly; the cost is a stray
-                // Login Item, which "Reset everything and quit" reports.
-                bootOutLegacyWatcher()
             } catch {
                 // register() also throws while the agent sits in Login
                 // Items awaiting approval or switched off there. That is
@@ -575,16 +591,25 @@ final class AppRuntime {
             // property is first taken.
             guard state.featuresRunning else { return }
             startAcceleration()
-        } else if pointerAccel != nil {
+        } else if let accel = pointerAccel {
             // disable() restores the original and stops the reassert timer.
             // Runs even while ungranted: a revoked grant leaves pointerAccel
             // holding the property (stopFeatures keeps it under control), so
             // the off half must not wait for featuresRunning.
-            pointerAccel?.disable()
-            pointerAccel = nil
-            state.accelHeld = false
-            state.accelWriteFailing = false
-            state.accelUnresponsive = false
+            if accel.disable() {
+                pointerAccel = nil
+                state.accelHeld = false
+                state.accelWriteFailing = false
+                state.accelUnresponsive = false
+            } else {
+                // The property still reads -1 and the original could not be
+                // written back. The instance stays: its claim and stored
+                // original are what a later restore (the next toggle cycle,
+                // quit, or reset) puts back, and dropping it would leave -1
+                // held by nobody after deinit's one retry. The toggle must
+                // read failed, not off, same as a failed enable.
+                state.accelWriteFailing = true
+            }
         }
     }
 
@@ -725,8 +750,8 @@ final class AppRuntime {
     }
 
     // Boots out and deletes the legacy job. Run by "Reset everything and
-    // quit" and after a successful SMAppService registration that makes a
-    // leftover legacy job redundant. Returns a failure description, or nil
+    // quit" and ahead of an SMAppService registration, which needs the shared
+    // label free (see registerWatcher). Returns a failure description, or nil
     // once the job is neither loaded nor on disk. bootout's exit code is not
     // the signal: it is nonzero for a job that was never loaded, which is
     // the normal state of a plist whose bootstrap failed, so the job's
