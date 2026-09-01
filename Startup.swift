@@ -14,21 +14,31 @@ final class InstanceLock {
     private let path: String
     private var fd: Int32 = -1
 
+    // Set when the lock file itself could not be opened (a file sitting where
+    // the parent directory belongs, a permissions problem, a full disk). Nil
+    // after a lost contest: the caller tells those apart because the first
+    // is a startup failure to explain and the second is a running instance.
+    private(set) var openFailure: String?
+
     init(path: String) {
         self.path = path
     }
 
     // Creates parent directories as needed. Returns false when another live
     // process (or another open descriptor) holds the lock, or when the lock
-    // file cannot be opened at all — either way this instance is not the
-    // owner and must touch nothing.
+    // file cannot be opened at all (openFailure set) — either way this
+    // instance is not the owner and must touch nothing.
     func acquire() -> Bool {
         guard fd < 0 else { return true }
+        openFailure = nil
         let dir = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true)
         let openFd = open(path, O_CREAT | O_RDWR, 0o644)
-        guard openFd >= 0 else { return false }
+        guard openFd >= 0 else {
+            openFailure = "\(path): \(String(cString: strerror(errno)))"
+            return false
+        }
         guard flock(openFd, LOCK_EX | LOCK_NB) == 0 else {
             close(openFd)
             return false

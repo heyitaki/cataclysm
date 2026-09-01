@@ -165,13 +165,21 @@ final class AppRuntime {
             .appendingPathComponent("instance.lock").path)
     }
 
-    // Steps 1-3. The loser of the lock and a blocked install location both
-    // show one screen and exit 0 having touched nothing: no cursor writes
-    // beyond step 2's release, no acceleration property, no agent, and the
-    // exit restorers are deliberately not installed yet.
+    // Steps 1-3. The loser of the lock, an unopenable lock file, and a
+    // blocked install location each show one screen and exit 0 having touched
+    // nothing: no cursor writes beyond step 2's release, no acceleration
+    // property, no agent, and the exit restorers are deliberately not
+    // installed yet.
     func preflight() {
         if !lock.acquire() {
-            showDuplicateNotice()
+            // An unopenable lock file is not a second instance: saying so
+            // would send the user hunting for a process that does not exist
+            // at every launch, with nothing to fix. Name the path instead.
+            if let failure = lock.openFailure {
+                showLockFailure(failure)
+            } else {
+                showDuplicateNotice()
+            }
             exit(0)
         }
         // Thaw a cursor a dead instance left frozen. Needs no Accessibility
@@ -198,9 +206,17 @@ final class AppRuntime {
         applyHotkey()
         installExitRestorers()
         state.trusted = AXIsProcessTrusted()
+        // Both branches wait for the run loop, which SwiftUI starts after
+        // start() returns. The taps are active (.defaultTap) from creation and
+        // are serviced only from the main run loop, so a tap created here
+        // would hold every mouse event until then; and registration spawns
+        // launchctl synchronously on the legacy path, which stretches that
+        // stall. Deferring puts both on the first run loop pass instead.
         if state.trusted {
-            startFeatures()
-            registerAgentsIfNeeded()
+            DispatchQueue.main.async {
+                self.startFeatures()
+                self.registerAgentsIfNeeded()
+            }
         } else {
             // The window needs the run loop; this fires once SwiftUI starts it.
             DispatchQueue.main.async { self.showOnboarding() }
@@ -875,6 +891,19 @@ final class AppRuntime {
         alert.informativeText =
             "This copy will quit. The running instance keeps control of the "
             + "cursor and pointer settings."
+        alert.runModal()
+    }
+
+    private func showLockFailure(_ failure: String) {
+        _ = NSApplication.shared
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Cataclysm could not start"
+        alert.informativeText =
+            "The instance lock file could not be opened, so Cataclysm cannot "
+            + "tell whether another copy is running and will quit. Remove "
+            + "whatever is in the way and open it again.\n\n\(failure)"
+        alert.addButton(withTitle: "Quit")
         alert.runModal()
     }
 

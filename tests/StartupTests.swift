@@ -52,6 +52,7 @@ struct StartupTests {
         // way a second launched copy would.
         let second = InstanceLock(path: path)
         checkEq(second.acquire(), false, "second acquire loses while held")
+        checkEq(second.openFailure, nil, "a lost contest is not an open failure")
 
         // acquire on an already-held lock is idempotent for the owner
         checkEq(first.acquire(), true, "re-acquire by the owner succeeds")
@@ -67,6 +68,9 @@ struct StartupTests {
         FileManager.default.createFile(atPath: blocker, contents: nil)
         let bad = InstanceLock(path: blocker + "/x/instance.lock")
         checkEq(bad.acquire(), false, "unopenable lock path is not acquired")
+        check(bad.openFailure?.hasPrefix(blocker) == true,
+              "unopenable lock path reports the open failure",
+              "got \(String(describing: bad.openFailure))")
     }
 
     static func installLocationTests() {
