@@ -18,7 +18,7 @@ Needs macOS 13 (Ventura) or later; works on both Apple silicon and Intel Macs.
    - This is needed once. After that it opens like any other app.
 4. Cataclysm asks for the Accessibility permission on first run and walks you through granting it. It needs Accessibility to see mouse events; nothing works until it's granted.
 
-Look for the Cataclysm icon in the menu bar. The dropdown has the on/off switches, the game picker, and a scroll speed slider; the rest is under Advanced.
+Look for the Cataclysm icon in the menu bar. The dropdown has the on/off switches, the application picker, and a scroll speed slider; the rest is under Advanced.
 
 Press ⌥⌘L to toggle the cursor lock at any time, even while the game has focus. You can record a different shortcut under Advanced.
 
@@ -36,7 +36,7 @@ Cataclysm clamps and rewrites your own mouse input: it keeps the cursor inside t
 
 ## Uninstall
 
-Open the dropdown, expand Advanced, and click "Reset everything and quit". That restores your mouse acceleration, reconnects the cursor, removes the crash-recovery helper and the login item, and clears all settings. Then drag Cataclysm from Applications to the Trash.
+Open the dropdown, turn off "Launch at login", and click "Quit Cataclysm". Quitting restores your mouse acceleration and reconnects the cursor. Then drag Cataclysm from Applications to the Trash; the crash-recovery helper runs from inside the app bundle, so it goes with it, and you can remove its entry under System Settings > General > Login Items if one remains.
 
 ## Building from source
 

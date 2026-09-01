@@ -39,6 +39,9 @@ struct GamePickerTests {
         orderingTests()
         labelTests()
         quitTransitionTests()
+        pinnedTests()
+        noTargetTests()
+        knownAppTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
     }
@@ -123,5 +126,64 @@ struct GamePickerTests {
         let after = build([])
         check(before[0].isRunning, "quit: target was running before")
         check(!after[0].isRunning, "quit: synthesized after the target quits")
+    }
+
+    static func pinnedTests() {
+        let pinnedID = "com.example.pinned"
+        let pinned = [GamePickerCandidate(bundleID: pinnedID, name: "Pinned")]
+
+        // Closed pinned app: synthesized, right after the stored row, ahead of
+        // the running section.
+        let closed = buildGamePickerRows(
+            storedBundleID: storedID, storedName: storedName, pinned: pinned,
+            running: [GamePickerCandidate(bundleID: "com.apple.finder", name: "Finder")],
+            ownBundleID: selfID)
+        checkEq(closed.map(\.bundleID), [storedID, pinnedID, "com.apple.finder"],
+                "pinned: stored, then pinned, then running")
+        check(!closed[1].isRunning, "pinned: closed pinned app synthesized")
+
+        // Running pinned app: takes the running row, no repeat below.
+        let open = buildGamePickerRows(
+            storedBundleID: storedID, storedName: storedName, pinned: pinned,
+            running: [GamePickerCandidate(bundleID: pinnedID, name: "Pinned Live")],
+            ownBundleID: selfID)
+        checkEq(open.count, 2, "pinned: running pinned app not duplicated")
+        checkEq(open[1].name, "Pinned Live", "pinned: running name wins")
+        check(open[1].isRunning, "pinned: running pinned app marked running")
+
+        // Stored target is the pinned app: one row, stored position.
+        let same = buildGamePickerRows(
+            storedBundleID: pinnedID, storedName: "Pinned", pinned: pinned,
+            running: [], ownBundleID: selfID)
+        checkEq(same.count, 1, "pinned: stored pinned app listed once")
+
+        // Cataclysm itself cannot be pinned any more than it can be picked.
+        let own = buildGamePickerRows(
+            storedBundleID: storedID, storedName: storedName,
+            pinned: [GamePickerCandidate(bundleID: selfID, name: "Cataclysm")],
+            running: [], ownBundleID: selfID)
+        checkEq(own.count, 1, "pinned: own bundle excluded")
+    }
+
+    static func noTargetTests() {
+        // No stored target: nothing synthesized, pinned and running rows only.
+        let rows = buildGamePickerRows(
+            storedBundleID: nil, storedName: "",
+            pinned: [GamePickerCandidate(bundleID: "com.example.pinned", name: "Pinned")],
+            running: [GamePickerCandidate(bundleID: "com.apple.finder", name: "Finder")],
+            ownBundleID: selfID)
+        checkEq(rows.map(\.bundleID), ["com.example.pinned", "com.apple.finder"],
+                "none: no synthesized stored row")
+    }
+
+    static func knownAppTests() {
+        checkEq(knownAppName(for: "com.riotgames.LeagueofLegends.GameClient"),
+                "League of Legends", "known: in-game client keeps the plain name")
+        checkEq(knownAppName(for: "com.riotgames.LeagueofLegends.LeagueClientUx"),
+                "League of Legends Launcher", "known: launcher named apart")
+        checkEq(knownAppName(for: "com.apple.finder"), nil, "known: unknown app unnamed")
+        checkEq(pinnedApps.map { $0.bundleID },
+                ["com.riotgames.LeagueofLegends.GameClient"],
+                "known: only the in-game client is pinned")
     }
 }

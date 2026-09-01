@@ -17,6 +17,7 @@ import Foundation
 
 final class Settings {
     enum Key {
+        static let enabled = "app.enabled"
         static let jailEnabled = "jail.enabled"
         static let targetBundleID = "jail.targetBundleID"
         static let targetDisplayName = "jail.targetDisplayName"
@@ -38,12 +39,18 @@ final class Settings {
         // the version would force a needless watcher re-register cycle with
         // its 10s uncovered probe window on the next launch.
         static let all = [
-            jailEnabled, targetBundleID, targetDisplayName, cornerRadius,
+            enabled, jailEnabled, targetBundleID, targetDisplayName, cornerRadius,
             accelerationOff, invertVertical, invertHorizontal, flattenNotches,
             linesPerNotch, mulThousandths, altTrackpadDetection,
             hotkeyKeyCode, hotkeyModifiers, launchAtLogin,
         ]
     }
+
+    // Stored as the target bundle id when no application is chosen. Bundle
+    // ids allow only alphanumerics, hyphens, and periods, so this can never
+    // collide with a real one, and it is non-empty so the store keeps it
+    // instead of falling back to the default target.
+    static let noTarget = "(none)"
 
     enum Default {
         static let targetBundleID = "com.riotgames.LeagueofLegends.GameClient"
@@ -112,6 +119,13 @@ final class Settings {
     }
 
     // MARK: - Preferences
+
+    // The master switch: off stops every feature (jail, scroll filter,
+    // acceleration) while the app keeps running and keeps its settings.
+    var enabled: Bool {
+        get { bool(Key.enabled, or: true) }
+        set { defaults.set(newValue, forKey: Key.enabled) }
+    }
 
     var jailEnabled: Bool {
         get { bool(Key.jailEnabled, or: true) }

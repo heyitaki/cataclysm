@@ -70,6 +70,7 @@ struct SettingsTests {
     static func defaultsTests() {
         let store = scratch("defaults")
         let s = Settings(defaults: store, legacy: nil)
+        checkEq(s.enabled, true, "default: master switch on")
         checkEq(s.jailEnabled, true, "default: jail enabled")
         checkEq(s.targetBundleID, "com.riotgames.LeagueofLegends.GameClient",
                 "default: target bundle id")
@@ -237,6 +238,7 @@ struct SettingsTests {
         s.resetToDefaults()
 
         checkEq(s.jailEnabled, true, "reset: jail back to default")
+        checkEq(s.enabled, true, "reset: master switch back on")
         checkEq(s.linesPerNotch, 1, "reset: lines back to default")
         checkEq(s.targetBundleID, "com.riotgames.LeagueofLegends.GameClient",
                 "reset: target back to default")

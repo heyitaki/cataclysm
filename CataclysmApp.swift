@@ -109,9 +109,6 @@ final class AppState: ObservableObject {
     // The login item was switched off in Login Items while the preference
     // is on. Shown as an approval hint, never as a failure.
     @Published var loginItemRequiresApproval = false
-    // "Reset everything and quit" found state it could not tear down and
-    // erased nothing; names what is still in place.
-    @Published var resetError: String?
     // RegisterEventHotKey refused the chord (another app owns it). Shows in
     // the hotkey row rather than leaving a recorded chord that does nothing.
     @Published var hotkeyRegistrationFailed = false
@@ -122,6 +119,7 @@ final class AppState: ObservableObject {
 // keep this mirror in sync, so a control can never show a value that did not
 // reach storage.
 final class SettingsModel: ObservableObject {
+    @Published var enabled = true
     @Published var jailEnabled = true
     @Published var accelOff = true
     @Published var invertVertical = true
@@ -218,7 +216,7 @@ final class AppRuntime {
         // stall. Deferring puts both on the first run loop pass instead.
         if state.trusted {
             DispatchQueue.main.async {
-                self.startFeatures()
+                if loaded.enabled { self.startFeatures() }
                 self.registerAgentsIfNeeded()
             }
         } else {
@@ -265,6 +263,7 @@ final class AppRuntime {
     // reset) is never shown stale.
     func reloadPanel() {
         guard let settings else { return }
+        panel.enabled = settings.enabled
         panel.jailEnabled = settings.jailEnabled
         panel.accelOff = settings.accelerationOff
         panel.invertVertical = settings.invertVertical
@@ -284,16 +283,29 @@ final class AppRuntime {
 
     // Snapshot the running .regular apps into pure picker rows. Called on
     // panel open (via reloadPanel) and on every workspace launch/terminate
-    // notification.
+    // notification. The stored target is kept whatever its activation
+    // policy: its row claims "(not running)" when absent, and a target
+    // running as an accessory app is still running. Known apps take their
+    // picker name from the table so Riot's look-alike apps stay apart.
     func rebuildGamePicker() {
         guard let settings else { return }
+        let target = settings.targetBundleID
+        let stored: String? = target == Settings.noTarget ? nil : target
+        let keep = Set(pinnedApps.compactMap(\.bundleID) + [target])
         let running = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
-            .map { GamePickerCandidate(bundleID: $0.bundleIdentifier,
-                                       name: $0.localizedName) }
+            .filter { app in
+                app.activationPolicy == .regular
+                    || app.bundleIdentifier.map(keep.contains) == true
+            }
+            .map { app in
+                GamePickerCandidate(
+                    bundleID: app.bundleIdentifier,
+                    name: app.bundleIdentifier.flatMap(knownAppName(for:)) ?? app.localizedName)
+            }
         panel.pickerRows = buildGamePickerRows(
-            storedBundleID: settings.targetBundleID,
-            storedName: settings.targetDisplayName,
+            storedBundleID: stored,
+            storedName: knownAppName(for: target) ?? settings.targetDisplayName,
+            pinned: pinnedApps,
             running: running, ownBundleID: cataclysmBundleID)
     }
 
@@ -304,7 +316,7 @@ final class AppRuntime {
         if trusted {
             onboarding?.close()
             onboarding = nil
-            startFeatures()
+            if settings?.enabled ?? true { startFeatures() }
             registerAgentsIfNeeded()
         } else {
             // Revoked while running: the taps stop delivering and that is not
@@ -618,7 +630,6 @@ final class AppRuntime {
     // re-requested and shows as an approval hint, not a failure. Turning the
     // preference off unregisters in that state too, else the entry would
     // outlive the setting and launch the app again once re-enabled there
-    // (resetEverythingAndQuit counts the same pair of states as registered).
     private func syncLoginItem() {
         guard let settings else { return }
         let status = SMAppService.mainApp.status
@@ -667,6 +678,21 @@ final class AppRuntime {
     // immediately (spec "The dropdown"). Setters are safe to call while
     // ungranted: they persist the preference, and the live half applies when
     // startFeatures() runs.
+
+    // The master switch. Off is the trust-revoked teardown plus releasing
+    // the acceleration property, so the mouse behaves as if the app had
+    // quit; on restarts everything under the same trust gate as startup.
+    // The stored feature preferences are untouched either way.
+    func setEnabled(_ on: Bool) {
+        settings?.enabled = on
+        panel.enabled = on
+        if on {
+            if state.trusted { startFeatures() }
+        } else {
+            stopFeatures()
+            releaseAcceleration()
+        }
+    }
 
     func setJailEnabled(_ on: Bool) {
         settings?.jailEnabled = on
@@ -721,25 +747,30 @@ final class AppRuntime {
             // property is first taken.
             guard state.featuresRunning else { return }
             startAcceleration()
-        } else if let accel = pointerAccel {
-            // disable() restores the original and stops the reassert timer.
+        } else {
             // Runs even while ungranted: a revoked grant leaves pointerAccel
             // holding the property (stopFeatures keeps it under control), so
             // the off half must not wait for featuresRunning.
-            if accel.disable() {
-                pointerAccel = nil
-                state.accelHeld = false
-                state.accelWriteFailing = false
-                state.accelUnresponsive = false
-            } else {
-                // The property still reads -1 and the original could not be
-                // written back. The instance stays: its claim and stored
-                // original are what a later restore (the next toggle cycle,
-                // quit, or reset) puts back, and dropping it would leave -1
-                // held by nobody after deinit's one retry. The toggle must
-                // read failed, not off, same as a failed enable.
-                state.accelWriteFailing = true
-            }
+            releaseAcceleration()
+        }
+    }
+
+    // disable() restores the original and stops the reassert timer.
+    private func releaseAcceleration() {
+        guard let accel = pointerAccel else { return }
+        if accel.disable() {
+            pointerAccel = nil
+            state.accelHeld = false
+            state.accelWriteFailing = false
+            state.accelUnresponsive = false
+        } else {
+            // The property still reads -1 and the original could not be
+            // written back. The instance stays: its claim and stored
+            // original are what a later restore (the next toggle cycle or
+            // quit) puts back, and dropping it would leave -1 held by nobody
+            // after deinit's one retry. The toggle must read failed, not
+            // off, same as a failed enable.
+            state.accelWriteFailing = true
         }
     }
 
@@ -842,98 +873,8 @@ final class AppRuntime {
         }
     }
 
-    // Strict order from the spec: restore acceleration and re-associate the
-    // cursor BEFORE clearing UserDefaults, or the only record of the real
-    // acceleration value is destroyed while the live property is still -1.
-    // Then unregister the watcher agent and the login item (and boot out the
-    // legacy plist if one exists), then clear everything, then exit.
-    // The clear is gated on every teardown step having actually taken
-    // effect: a failed restore leaves the property at -1 with the stored
-    // original as its only record, and a registration that survived would
-    // outlive the settings that know about it. On failure the settings are
-    // kept, the steps that did succeed are redone from those settings (the
-    // agents re-registered, acceleration re-taken), the app keeps running,
-    // and the panel says what is still in place so a retry is possible.
-    // Every step is idempotent, so a retry only redoes what failed.
-    func resetEverythingAndQuit() {
-        var remaining: [String] = []
-        // A spawn check still polling must not re-install a watcher after
-        // this teardown.
-        watcherProbeGeneration += 1
-        // disable(), not restore(): the steps below spin the main run loop
-        // (waitUntilExit in runLaunchctl), and a reassert tick landing there
-        // would re-take the property right before its stored original is
-        // erased.
-        if let pointerAccel {
-            if pointerAccel.disable() {
-                // The property is back to its original. Said here so the
-                // panel stays truthful when a later step fails and the
-                // re-take below is skipped (ungranted, or features down).
-                state.accelHeld = false
-            } else {
-                remaining.append("pointer acceleration could not be restored")
-            }
-        }
-        CGAssociateMouseAndMouseCursorPosition(1)
-        let agent = SMAppService.agent(plistName: watcherPlistName)
-        try? agent.unregister()
-        if agent.status == .requiresApproval {
-            remaining.append("the crash-recovery agent is still registered")
-        }
-        if let failure = bootOutLegacyWatcher() { remaining.append(failure) }
-        // BTM keys launch items by label: freeing it with the legacy bootout
-        // lets smd re-submit the agent's record within about a second
-        // (measured; SmokeGate.noTraceLeft defends the same race). The exit
-        // below must not outrun that, so poll and re-unregister until the
-        // record stays gone. usleep rather than the run loop, so the refresh
-        // timer cannot fire mid-teardown.
-        var agentGone = false
-        for _ in 0..<6 {
-            if agent.status == .enabled { try? agent.unregister() }
-            agentGone = agent.status != .enabled
-                && runLaunchctl(
-                    ["print", "gui/\(getuid())/\(legacyWatcherLabel)"]).code != 0
-            if agentGone { break }
-            usleep(500_000)
-        }
-        if !agentGone {
-            remaining.append("the crash-recovery agent re-registered itself")
-        }
-        try? SMAppService.mainApp.unregister()
-        if SMAppService.mainApp.status == .enabled
-            || SMAppService.mainApp.status == .requiresApproval {
-            remaining.append("the login item is still registered")
-        }
-        guard remaining.isEmpty else {
-            state.resetError = "Reset stopped, settings kept: "
-                + remaining.joined(separator: "; ")
-            // Undo the teardown that did succeed, under the same trust
-            // gate as startup: agents are only ever registered once trusted.
-            if state.trusted {
-                registerAgentsIfNeeded()
-                if state.featuresRunning, settings?.accelerationOff == true {
-                    startAcceleration()
-                }
-            } else {
-                refreshWatcherStatus()
-            }
-            return
-        }
-        UserDefaults.standard.removePersistentDomain(
-            forName: Bundle.main.bundleIdentifier ?? cataclysmBundleID)
-        // The unbundled CLI's domain still holds the migrated recovery
-        // value; left behind, the next launch re-imports what was just
-        // erased. And exit(0) bypasses AppKit teardown while preference
-        // writes reach cfprefsd asynchronously, so flush before exiting.
-        UserDefaults.standard.removePersistentDomain(
-            forName: Settings.legacyDomainName)
-        UserDefaults.standard.synchronize()
-        exit(0)
-    }
-
-    // Boots out and deletes the legacy job. Run by "Reset everything and
-    // quit" and ahead of an SMAppService registration, which needs the shared
-    // label free (see registerWatcher). Returns a failure description, or nil
+    // Boots out and deletes the legacy job, ahead of an SMAppService
+    // registration, which needs the shared label free (see registerWatcher). Returns a failure description, or nil
     // once the job is neither loaded nor on disk. bootout's exit code is not
     // the signal: it is nonzero for a job that was never loaded, which is
     // the normal state of a plist whose bootstrap failed, so the job's
@@ -1121,20 +1062,28 @@ struct OnboardingView: View {
 // MARK: - Panel
 
 struct CataclysmApp: App {
+    @ObservedObject private var panel = AppRuntime.shared.panel
+    // Drawn once per state; the label re-evaluates on every panel change.
+    private static let activeIcon = makeMenuBarIcon(active: true)
+    private static let inactiveIcon = makeMenuBarIcon(active: false)
+
     var body: some Scene {
         // `.window` style is a spec requirement: the scroll slider does not
         // render in `.menu`.
-        MenuBarExtra("Cataclysm", systemImage: "cursorarrow.rays") {
+        MenuBarExtra {
             PanelView(state: AppRuntime.shared.state, model: AppRuntime.shared.panel)
+        } label: {
+            Image(nsImage: panel.enabled ? Self.activeIcon : Self.inactiveIcon)
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-// The default view (spec "The dropdown"): header, jail toggle with the game
-// row, acceleration toggle, invert-wheel toggle, scroll speed slider, Launch
-// at login, Quit. Width fixed at 320 points so the panel never reflows as
-// values change. The Advanced DisclosureGroup is Task 9.
+// The default view (spec "The dropdown"), laid out as menu rows: every row
+// shares one height and inset, commands highlight on hover like menu items,
+// and the Advanced knobs live on a second page standing in for a submenu (a
+// `.window` panel has no real ones). Width fixed at 320 points so the panel
+// never reflows as values change.
 struct PanelView: View {
     @ObservedObject var state: AppState
     @ObservedObject var model: SettingsModel
@@ -1143,6 +1092,8 @@ struct PanelView: View {
     @State private var sliderPos = 0.0
     @State private var draggingSlider = false
     @State private var dragStartPos = 0.0
+    // Which page shows; every open starts on the main page.
+    @State private var showingAdvanced = false
 
     // Ungranted: both taps are down, so the jail and the scroll filter read
     // unavailable rather than on. The acceleration property needs no grant
@@ -1153,29 +1104,15 @@ struct PanelView: View {
     private var accelFailed: Bool { state.accelWriteFailing || state.accelUnresponsive }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            if state.trusted && !state.watcherRegistered { watcherRow }
-            if let watcherError = state.watcherError {
-                Text(watcherError).font(.caption).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let resetError = state.resetError {
-                Text(resetError).font(.caption).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Divider()
-            jailSection
-            Divider()
-            scrollSection
-            Divider()
-            advancedSection
-            Divider()
-            footer
+        VStack(alignment: .leading, spacing: 0) {
+            if showingAdvanced { advancedPage } else { mainPage }
         }
-        .padding(12)
-        .frame(width: 320)
+        .padding(menuPanelInset)
+        .frame(width: menuPanelWidth)
+        .background(PanelBackground())
+        .background(PanelWindowStyle())
         .onAppear {
+            showingAdvanced = false
             AppRuntime.shared.reloadPanel()
             AppRuntime.shared.refreshWatcherStatus()
             AppRuntime.shared.refreshLoginItemStatus()
@@ -1185,100 +1122,39 @@ struct PanelView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Cataclysm").font(.headline)
-            if state.trusted {
-                Text("Accessibility granted")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                HStack {
-                    Label("Accessibility not granted",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
-                    Spacer()
-                    Button("Grant…") { AppRuntime.shared.showOnboarding() }
+    // MARK: Pages
+
+    private var mainPage: some View {
+        Group {
+            staticRow {
+                Text("Cataclysm").font(.headline)
+                Spacer()
+                Toggle("Cataclysm on", isOn: Binding(
+                    get: { model.enabled },
+                    set: { AppRuntime.shared.setEnabled($0) }))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
+            if !state.trusted {
+                warningRow("Grant Accessibility access…") {
+                    AppRuntime.shared.showOnboarding()
                 }
             }
-        }
-    }
-
-    private var watcherRow: some View {
-        HStack {
-            Label(state.watcherRequiresApproval
-                    ? "Crash recovery needs approval"
-                    : "Crash recovery is off",
-                  systemImage: "exclamationmark.triangle")
-                .font(.caption).foregroundStyle(.orange)
-            Spacer()
-            loginItemsButton
-        }
-    }
-
-    private var loginItemsButton: some View {
-        Button("Login Items…") {
-            let link = "x-apple.systempreferences:"
-                + "com.apple.LoginItems-Settings.extension"
-            if let url = URL(string: link) { NSWorkspace.shared.open(url) }
-        }
-    }
-
-    private var jailSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            featureToggle("Lock cursor to game window",
+            if state.trusted && !state.watcherRegistered {
+                warningRow(state.watcherRequiresApproval
+                           ? "Crash recovery needs approval in Login Items…"
+                           : "Crash recovery is off; open Login Items…",
+                           action: openLoginItems)
+            }
+            errorRow(state.watcherError)
+            menuDivider
+            featureToggle("Lock cursor to app when focused",
                           isOn: model.jailEnabled,
                           failed: jailFailed,
                           held: false,
                           set: { AppRuntime.shared.setJailEnabled($0) })
-            gameRow.padding(.leading, 18)
-        }
-    }
-
-    // Sentinel tag for the chooser row; a bundle id can never be empty here
-    // because rows without one are excluded from the list.
-    private let chooseTag = ""
-
-    // Rows tagged by bundle id, never by name, so two apps with the same
-    // display name stay distinguishable. Selecting the chooser row opens the
-    // NSOpenPanel and leaves the stored selection untouched until it returns.
-    private var gameRow: some View {
-        Picker("Game", selection: Binding(
-            get: { model.targetBundleID },
-            set: { tag in
-                if tag == chooseTag {
-                    AppRuntime.shared.chooseTargetFromApplications()
-                } else if let row = model.pickerRows.first(where: { $0.bundleID == tag }) {
-                    AppRuntime.shared.setTarget(bundleID: row.bundleID, name: row.name)
-                }
-            })) {
-            ForEach(model.pickerRows, id: \.bundleID) { row in
-                HStack(spacing: 6) {
-                    Image(nsImage: icon(for: row))
-                        .resizable()
-                        .frame(width: 16, height: 16)
-                    Text(row.label)
-                }
-                .tag(row.bundleID)
-            }
-            Divider()
-            Text("Choose from Applications…").tag(chooseTag)
-        }
-    }
-
-    // Icons resolve at render time: running rows use NSRunningApplication's
-    // icon, the synthesized stored row falls back to the generic app icon.
-    private func icon(for row: GamePickerRow) -> NSImage {
-        if row.isRunning,
-           let app = NSWorkspace.shared.runningApplications
-               .first(where: { $0.bundleIdentifier == row.bundleID }),
-           let appIcon = app.icon {
-            return appIcon
-        }
-        return NSWorkspace.shared.icon(for: .applicationBundle)
-    }
-
-    private var scrollSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+            gameRow
+            menuDivider
             accelToggle
             // A downed tap holds nothing a click could undo, so these
             // tap-backed toggles pass held: false and disable while failed;
@@ -1289,8 +1165,215 @@ struct PanelView: View {
                           held: false,
                           set: { AppRuntime.shared.setInvertVertical($0) })
             sliderRow
+            menuDivider
+            MenuRow(title: "Advanced", trailingSymbol: "chevron.right") {
+                showingAdvanced = true
+            }
+            menuDivider
+            staticRow {
+                Toggle("Launch at login", isOn: Binding(
+                    get: { model.launchAtLogin },
+                    set: { AppRuntime.shared.setLaunchAtLogin($0) }))
+                    .toggleStyle(.checkbox)
+            }
+            errorRow(state.loginItemError)
+            if state.loginItemRequiresApproval {
+                warningRow("Launch at login needs approval in Login Items…",
+                           action: openLoginItems)
+            }
+            MenuRow(title: "Check for updates…") {
+                // Canonical post-rename URL; the repo rename is a
+                // release-checklist item that makes it live.
+                let releases = "https://github.com/heyitaki/cataclysm/releases"
+                if let url = URL(string: releases) { NSWorkspace.shared.open(url) }
+            }
+            MenuRow(title: "Quit Cataclysm") { AppRuntime.shared.quit() }
         }
     }
+
+    // The Advanced page (spec "The dropdown"): the knobs a player has no
+    // reason to touch. Scroll knobs share the slider's disabled rule; the
+    // hotkey row, corner radius, and the commands stay live because they are
+    // preference writes, not tap-dependent.
+    private var advancedPage: some View {
+        Group {
+            MenuRow(title: "Advanced", leadingSymbol: "chevron.left", headline: true) {
+                showingAdvanced = false
+            }
+            menuDivider
+            featureToggle("Invert horizontal scrolling",
+                          isOn: model.invertHorizontal,
+                          failed: scrollFailed,
+                          held: false,
+                          set: { AppRuntime.shared.setInvertHorizontal($0) })
+            featureToggle("Flatten scroll notches",
+                          isOn: model.flattenNotches,
+                          failed: scrollFailed,
+                          held: false,
+                          set: { AppRuntime.shared.setFlattenNotches($0) })
+            stepperRow("Lines per notch",
+                       value: model.linesPerNotch, range: 1...1000,
+                       set: { AppRuntime.shared.setLinesPerNotch($0) })
+                .disabled(!state.trusted || scrollFailed || !model.enabled)
+            featureToggle("Alternate trackpad detection",
+                          isOn: model.altTrackpadDetection,
+                          failed: scrollFailed,
+                          held: false,
+                          set: { AppRuntime.shared.setAltTrackpadDetection($0) })
+            staticRow { HotkeyRow(state: state, model: model) }
+            stepperRow("Corner radius",
+                       value: Int(model.cornerRadiusSetting), range: 0...200,
+                       set: { AppRuntime.shared.setCornerRadius(Double($0)) })
+                .help("Radius of the jail's rounded corners; 0 disables corner clamping")
+            menuDivider
+            MenuRow(title: "Reset to defaults") {
+                AppRuntime.shared.resetToDefaults()
+                // sliderPos is view-local drag state; resync it to the
+                // freshly reset stored multiplier.
+                sliderPos = sliderPosition(forMultiplier:
+                    Double(AppRuntime.shared.panel.mulThousandths) / 1_000)
+            }
+        }
+    }
+
+    // MARK: Row helpers
+
+    private var menuDivider: some View {
+        Divider().padding(.vertical, 5).padding(.horizontal, menuRowInset)
+    }
+
+    // A row without a command: same height and inset as a MenuRow, no
+    // highlight, so controls line up with the commands around them.
+    private func staticRow<Content: View>(
+        @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 6) { content() }
+            .frame(maxWidth: .infinity, minHeight: menuRowHeight, alignment: .leading)
+            .padding(.horizontal, menuRowInset)
+    }
+
+    private func warningRow(_ title: String, action: @escaping () -> Void) -> some View {
+        MenuRow(title: title, leadingSymbol: "exclamationmark.triangle.fill",
+                tint: .orange, action: action)
+    }
+
+    @ViewBuilder
+    private func errorRow(_ text: String?) -> some View {
+        if let text {
+            staticRow {
+                Text(text).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func openLoginItems() {
+        let link = "x-apple.systempreferences:"
+            + "com.apple.LoginItems-Settings.extension"
+        if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+    }
+
+    // MARK: Application row
+
+    // Sentinel tag for the chooser row; a real bundle id is never empty.
+    private let chooseTag = ""
+
+    // Rows tagged by bundle id, never by name, so two apps with the same
+    // display name stay distinguishable. "None" clears the target so the jail
+    // matches nothing; selecting the chooser row opens the NSOpenPanel and
+    // leaves the stored selection untouched until it returns. A Menu with a
+    // hand-drawn label rather than a bare Picker: a pop-up button sizes to
+    // its content and cannot be stretched to the row, this label can.
+    private var gameRow: some View {
+        staticRow {
+            Menu {
+                Picker("Application", selection: Binding(
+                    get: { model.targetBundleID },
+                    set: { tag in
+                        if tag == chooseTag {
+                            AppRuntime.shared.chooseTargetFromApplications()
+                        } else if tag == Settings.noTarget {
+                            AppRuntime.shared.setTarget(bundleID: Settings.noTarget, name: "None")
+                        } else if let row = model.pickerRows.first(where: { $0.bundleID == tag }) {
+                            AppRuntime.shared.setTarget(bundleID: row.bundleID, name: row.name)
+                        }
+                    })) {
+                    Text("None").tag(Settings.noTarget)
+                    Divider()
+                    ForEach(model.pickerRows, id: \.bundleID) { row in
+                        rowLabel(row).tag(row.bundleID)
+                    }
+                    Divider()
+                    Text("Choose from Applications…").tag(chooseTag)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                HStack(spacing: 6) {
+                    if let row = selectedRow {
+                        rowLabel(row)
+                    } else {
+                        Text("None").foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, minHeight: 28)
+                .background(RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(0.1)))
+                .contentShape(Rectangle())
+            }
+            // .button with a plain button style renders the label as
+            // authored; .borderlessButton keeps only its text and image.
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+        }
+    }
+
+    private var selectedRow: GamePickerRow? {
+        model.pickerRows.first { $0.bundleID == model.targetBundleID }
+    }
+
+    // Icon, name, and a marker for a closed app, which stays selectable so
+    // the jail attaches the moment it launches. One concatenated Text: a
+    // menu item keeps only the first Text of its content.
+    private func rowLabel(_ row: GamePickerRow) -> some View {
+        HStack(spacing: 6) {
+            Image(nsImage: icon(for: row))
+                .resizable()
+                .frame(width: 18, height: 18)
+            (Text(row.label) + Text(row.isRunning ? "" : "  (not running)")
+                .foregroundColor(.secondary))
+                .lineLimit(1)
+        }
+    }
+
+    // Icons resolve at render time: a running row uses the process's icon, a
+    // closed one the installed bundle's (Launch Services knows every app that
+    // has ever run), and only an app that is nowhere on disk falls back to
+    // the generic icon.
+    private func icon(for row: GamePickerRow) -> NSImage {
+        let icon: NSImage
+        if row.isRunning,
+           let app = NSWorkspace.shared.runningApplications
+               .first(where: { $0.bundleIdentifier == row.bundleID }),
+           let appIcon = app.icon {
+            icon = appIcon
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: row.bundleID) {
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            icon = NSWorkspace.shared.icon(for: .applicationBundle)
+        }
+        // The pop-up draws the NSImage at its own size, ignoring the SwiftUI
+        // frame, so size the image itself or it fills the bezel edge to edge.
+        let sized = icon.copy() as! NSImage
+        sized.size = NSSize(width: 18, height: 18)
+        return sized
+    }
+
+    // MARK: Feature rows
 
     // Unavailable while ungranted only until the property is actually taken:
     // step 6 defers the first write to trust, so a checked toggle before then
@@ -1320,9 +1403,9 @@ struct PanelView: View {
     private func featureToggle(_ title: String, isOn: Bool, failed: Bool,
                                unavailable: Bool? = nil, held: Bool? = nil,
                                set: @escaping (Bool) -> Void) -> some View {
-        let unavailable = unavailable ?? !state.trusted
+        let unavailable = (unavailable ?? !state.trusted) || !model.enabled
         let held = held ?? isOn
-        return HStack {
+        return staticRow {
             Toggle(title, isOn: Binding(
                 get: { isOn && !unavailable && !failed },
                 set: { value in set(failed ? false : value) }))
@@ -1341,7 +1424,7 @@ struct PanelView: View {
         let readout = draggingSlider
             ? mulThousandths(forMultiplier: multiplier(forSliderPosition: sliderPos))
             : model.mulThousandths
-        return HStack(spacing: 6) {
+        return staticRow {
             Text("Scroll speed")
             Slider(value: $sliderPos, in: sliderPositionRange) { editing in
                 if editing { dragStartPos = sliderPos }
@@ -1359,7 +1442,7 @@ struct PanelView: View {
             .buttonStyle(.borderless)
             .help("Reset to 1.00x")
         }
-        .disabled(!state.trusted || scrollFailed)
+        .disabled(!state.trusted || scrollFailed || !model.enabled)
     }
 
     private func commitSlider() {
@@ -1374,93 +1457,147 @@ struct PanelView: View {
             forMultiplier: Double(AppRuntime.shared.panel.mulThousandths) / 1_000)
     }
 
-    // The Advanced group (spec "The dropdown"): collapsed by default, holding
-    // the knobs a player has no reason to touch. Scroll knobs share the
-    // slider's disabled rule; the hotkey row, corner radius, and the commands
-    // stay live because they are preference writes, not tap-dependent.
-    private var advancedSection: some View {
-        DisclosureGroup("Advanced") {
-            VStack(alignment: .leading, spacing: 6) {
-                Group {
-                    featureToggle("Invert horizontal scrolling",
-                                  isOn: model.invertHorizontal,
-                                  failed: scrollFailed,
-                                  held: false,
-                                  set: { AppRuntime.shared.setInvertHorizontal($0) })
-                    featureToggle("Flatten scroll notches",
-                                  isOn: model.flattenNotches,
-                                  failed: scrollFailed,
-                                  held: false,
-                                  set: { AppRuntime.shared.setFlattenNotches($0) })
-                    stepperRow("Lines per notch",
-                               value: model.linesPerNotch, range: 1...1000,
-                               set: { AppRuntime.shared.setLinesPerNotch($0) })
-                        .disabled(!state.trusted || scrollFailed)
-                    featureToggle("Alternate trackpad detection",
-                                  isOn: model.altTrackpadDetection,
-                                  failed: scrollFailed,
-                                  held: false,
-                                  set: { AppRuntime.shared.setAltTrackpadDetection($0) })
-                }
-                HotkeyRow(state: state, model: model)
-                stepperRow("Corner radius",
-                           value: Int(model.cornerRadiusSetting), range: 0...200,
-                           set: { AppRuntime.shared.setCornerRadius(Double($0)) })
-                    .help("Radius of the jail's rounded corners; 0 disables corner clamping")
-                Divider()
-                Button("Check for updates…") {
-                    // Canonical post-rename URL; the repo rename is a
-                    // release-checklist item that makes it live.
-                    let releases = "https://github.com/heyitaki/cataclysm/releases"
-                    if let url = URL(string: releases) { NSWorkspace.shared.open(url) }
-                }
-                Button("Reset to defaults") {
-                    AppRuntime.shared.resetToDefaults()
-                    // sliderPos is view-local drag state; resync it to the
-                    // freshly reset stored multiplier.
-                    sliderPos = sliderPosition(forMultiplier:
-                        Double(AppRuntime.shared.panel.mulThousandths) / 1_000)
-                }
-                Button("Reset everything and quit") {
-                    AppRuntime.shared.resetEverythingAndQuit()
-                }
-            }
-            .padding(.top, 6)
-        }
-    }
-
+    // Minus, value, plus: reads as "less or more" at a glance, which the
+    // stacked stepper arrows do not. The value cell is fixed width so one-
+    // and three-digit values leave the buttons in the same place.
     private func stepperRow(_ title: String, value: Int, range: ClosedRange<Int>,
                             set: @escaping (Int) -> Void) -> some View {
-        HStack {
+        staticRow {
             Text(title)
             Spacer()
-            Text("\(value)").monospacedDigit()
-            Stepper(title, value: Binding(get: { value }, set: set), in: range)
-                .labelsHidden()
+            HStack(spacing: 2) {
+                stepButton("minus", enabled: value > range.lowerBound) { set(value - 1) }
+                Text("\(value)").monospacedDigit().frame(width: 30)
+                stepButton("plus", enabled: value < range.upperBound) { set(value + 1) }
+            }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
+        .accessibilityValue("\(value)")
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Launch at login", isOn: Binding(
-                get: { model.launchAtLogin },
-                set: { AppRuntime.shared.setLaunchAtLogin($0) }))
-                .toggleStyle(.checkbox)
-            if let error = state.loginItemError {
-                Text(error).font(.caption).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if state.loginItemRequiresApproval {
-                HStack {
-                    Label("Launch at login needs approval",
-                          systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
+    private func stepButton(_ symbol: String, enabled: Bool,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 9, weight: .medium))
+                .frame(width: 20)
+        }
+        .buttonStyle(BezelButtonStyle())
+        .disabled(!enabled)
+    }
+}
+
+let menuPanelWidth: CGFloat = 320
+// Corner geometry: the window's corner radius, the inset of the rows from
+// the edge, and the highlight's own radius, kept concentric (outer radius
+// minus inset) so a highlighted edge row nests in the window corner the way
+// a native menu item does.
+// Measured off the MenuBarExtra window on macOS 26 (zoomed capture), not
+// documented anywhere.
+let menuPanelCornerRadius: CGFloat = 14
+let menuPanelInset: CGFloat = 6
+let menuHighlightRadius = menuPanelCornerRadius - menuPanelInset
+let menuRowHeight: CGFloat = 28
+let menuRowInset: CGFloat = 8
+
+// The panel's ground. The MenuBarExtra window draws its own material
+// beneath the content view; on macOS 26 that material is the system's glass,
+// the same one native menus wear, so nothing is painted over it (a glass
+// effect layered on top has nothing behind it to refract and reads flat).
+// Earlier systems draw a brighter popover material, covered here with a
+// near-black fill and a faint hairline for the Control Center look.
+struct PanelBackground: View {
+    private let fill = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(white: 0.11, alpha: 0.97)
+            : NSColor(white: 0.96, alpha: 0.97)
+    })
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            Color.clear
+        } else {
+            let shape = RoundedRectangle(cornerRadius: menuPanelCornerRadius, style: .continuous)
+            shape.fill(fill)
+                .overlay(shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
+        }
+    }
+}
+
+// Drops the MenuBarExtra window's shadow. On a dark panel the shadow paints
+// a bright rim light along the edge that no content can cover (it sits
+// above the content view); PanelBackground's hairline defines the edge
+// instead. Runs once the view is in a window, which is after makeNSView.
+struct PanelWindowStyle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { view.window?.hasShadow = false }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+// The one bezel every right-aligned control in the panel wears (stepper
+// buttons, the hotkey chord): a single height and corner radius so a column
+// of them lines up, unlike the mixed stock control sizes.
+struct BezelButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(minWidth: 20, minHeight: 22)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(configuration.isPressed ? 0.22 : 0.1)))
+            .opacity(enabled ? 1 : 0.35)
+            .contentShape(Rectangle())
+    }
+}
+
+// A command row that behaves like a menu item: full width, highlighted with
+// the accent color while hovered, dimmed and inert while disabled. The title
+// is a plain string so the button keeps an accessibility name; symbols are
+// optional decorations before and after it.
+struct MenuRow: View {
+    let title: String
+    var leadingSymbol: String? = nil
+    var trailingSymbol: String? = nil
+    var headline = false
+    var tint: Color? = nil
+    let action: () -> Void
+    @Environment(\.isEnabled) private var enabled
+    @State private var hovering = false
+
+    private var highlighted: Bool { hovering && enabled }
+
+    var body: some View {
+        // Clearing the hover first: a command that hands focus to another app
+        // dismisses the panel with the pointer still over this row, so no
+        // exit event arrives and the highlight would survive to the next open.
+        Button(action: { hovering = false; action() }) {
+            HStack(spacing: 6) {
+                if let leadingSymbol { symbol(leadingSymbol) }
+                Text(title).font(headline ? .headline : .body)
+                if let trailingSymbol {
                     Spacer()
-                    loginItemsButton
+                    symbol(trailingSymbol)
                 }
             }
-            Button("Quit") { AppRuntime.shared.quit() }
+            .frame(maxWidth: .infinity, minHeight: menuRowHeight, alignment: .leading)
+            .padding(.horizontal, menuRowInset)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(highlighted ? Color.white
+                         : !enabled ? Color.secondary
+                         : tint ?? Color.primary)
+        .background(RoundedRectangle(cornerRadius: menuHighlightRadius)
+            .fill(highlighted ? Color.accentColor : Color.clear))
+        .onHover { hovering = $0 }
+        .accessibilityLabel(title)
+    }
+
+    private func symbol(_ name: String) -> some View {
+        Image(systemName: name).font(.caption.weight(.semibold))
     }
 }
 
@@ -1488,13 +1625,17 @@ struct HotkeyRow: View {
             Spacer()
             KeyCapture(recording: recording, onKey: handle)
                 .frame(width: 0, height: 0)
-            Button(recording
-                    ? "Press keys… (Esc cancels)"
-                    : hotkeyChordLabel(keyCode: model.hotkeyKeyCode,
-                                       modifiers: model.hotkeyModifiers)) {
+            Button {
                 recording ? stopRecording() : startRecording()
+            } label: {
+                Text(recording
+                        ? "Press keys… (Esc cancels)"
+                        : hotkeyChordLabel(keyCode: model.hotkeyKeyCode,
+                                           modifiers: model.hotkeyModifiers))
+                    .monospacedDigit()
+                    .padding(.horizontal, 6)
             }
-            .monospacedDigit()
+            .buttonStyle(BezelButtonStyle())
         }
         .onDisappear { stopRecording() }
     }

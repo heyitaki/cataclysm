@@ -8,7 +8,7 @@ APP = build/Cataclysm.app
 .DELETE_ON_ERROR:
 
 # Explicit source list; a *.swift glob would silently pick up any stray file.
-APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift JailMath.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift
+APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift JailMath.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift MenuBarIcon.swift
 
 # Extra codesign flags for the release path (--timestamp); local builds stay
 # offline-friendly without one.
@@ -47,6 +47,14 @@ app: build/cataclysm build/Cataclysm.icns packaging/Info.plist.in packaging/$(BU
 	plutil -lint $(APP)/Contents/Library/LaunchAgents/$(BUNDLE_ID).watch.plist
 	codesign -f --options runtime $(CODESIGN_FLAGS) -s "$(IDENTITY)" $(APP)
 	codesign --verify --strict $(APP)
+
+# Local install: Spotlight and Raycast index /Applications, the repo's build
+# directory is invisible to both. A running copy is quit first so the
+# instance lock does not refuse the new one.
+install: app
+	-osascript -e 'tell application "Cataclysm" to quit' >/dev/null 2>&1
+	rm -rf /Applications/Cataclysm.app
+	ditto $(APP) /Applications/Cataclysm.app
 
 build/icon-gen: packaging/IconGen.swift
 	mkdir -p build
@@ -88,9 +96,11 @@ test: typecheck build/scrollfilter-tests build/settings-tests build/startup-test
 	./build/smoke-tests
 	./build/jailmath-tests
 
-# Whole-app compile check without linking, lipo, or signing.
+# Whole-app compile check without linking, lipo, or signing. Same macOS 13
+# target as the real build, so an API newer than the floor fails here and
+# not first at `make app`.
 typecheck: $(APP_SOURCES) Bridging.h
-	xcrun swiftc -typecheck -import-objc-header Bridging.h $(APP_SOURCES)
+	xcrun swiftc -typecheck -target arm64-apple-macos13.0 -import-objc-header Bridging.h $(APP_SOURCES)
 
 build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
 	mkdir -p build
@@ -163,4 +173,4 @@ release:
 clean:
 	rm -rf build
 
-.PHONY: all app test typecheck clean dmg release
+.PHONY: all app test typecheck clean dmg release install

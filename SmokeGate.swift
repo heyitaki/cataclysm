@@ -56,8 +56,8 @@ final class SmokeGate {
         // registration on the cleanup path, breaking "leave no trace".
         guard step("watcher not already registered", agent.status != .enabled,
                    detail: "an installed Cataclysm's watcher is registered; "
-                       + "unregister it (Reset everything and quit, or "
-                       + "System Settings > Login Items) before running the gate")
+                       + "unregister it (System Settings > Login Items) "
+                       + "before running the gate")
         else { return 1 }
         // Same refusal for the legacy mechanism: legacyPath() boots out the
         // label, then overwrites and deletes the plist at this exact path, so
@@ -69,8 +69,8 @@ final class SmokeGate {
             || FileManager.default.fileExists(atPath: legacyPlistURL.path)
         guard step("legacy watcher not already installed", !legacyLive,
                    detail: "an installed Cataclysm's legacy watcher job or "
-                       + "plist exists; remove it (Reset everything and quit) "
-                       + "before running the gate")
+                       + "plist exists; boot it out and delete it before "
+                       + "running the gate")
         else { return 1 }
         if smAppServicePath() {
             guard noTraceLeft() else {
