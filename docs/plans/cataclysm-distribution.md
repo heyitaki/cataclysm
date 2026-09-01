@@ -73,9 +73,9 @@ Traps already paid for, do not rediscover:
 
 ### Task 5: App bundle, placeholder icon, signing
 
-- [ ] App entry per Context (arg dispatch, then SwiftUI) with a minimal `MenuBarExtra("Cataclysm").menuBarExtraStyle(.window)` placeholder panel; explicit source list sharing `Jail.swift`, `TapHost.swift`, `PointerAccel.swift`, `ScrollFilter.swift`, `Settings.swift`; `--watch` and `--smoke-register` exist as stubs that print and exit 0.
-- [ ] `make app` assembles `build/Cataclysm.app`: `Info.plist` with `LSUIElement` true, `LSMinimumSystemVersion` 13.0, `CFBundleIdentifier io.github.heyitaki.cataclysm`, version from a `VERSION` Makefile variable; `Contents/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` exactly per the spec's watcher-plist block (`BundleProgram`, `KeepAlive` `{SuccessfulExit = false}`, `AssociatedBundleIdentifiers`); generated placeholder icns in `Contents/Resources`.
-- [ ] Sign with `IDENTITY ?= Cataclysm`; `codesign --verify --strict build/Cataclysm.app` exits 0; `plutil -lint` passes on both plists; `make` and `make test` still exit 0.
+- [x] App entry per Context (arg dispatch, then SwiftUI) with a minimal `MenuBarExtra("Cataclysm").menuBarExtraStyle(.window)` placeholder panel; explicit source list sharing `Jail.swift`, `TapHost.swift`, `PointerAccel.swift`, `ScrollFilter.swift`, `Settings.swift`; `--watch` and `--smoke-register` exist as stubs that print and exit 0. (`CataclysmApp.swift` also carries the spec-default globals and `fail` the shared modules read from `main.swift` in the CLI target; Task 11 folds that wiring together.)
+- [x] `make app` assembles `build/Cataclysm.app`: `Info.plist` with `LSUIElement` true, `LSMinimumSystemVersion` 13.0, `CFBundleIdentifier io.github.heyitaki.cataclysm`, version from a `VERSION` Makefile variable; `Contents/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` exactly per the spec's watcher-plist block (`BundleProgram`, `KeepAlive` `{SuccessfulExit = false}`, `AssociatedBundleIdentifiers`); generated placeholder icns in `Contents/Resources`. (Plist templates under `packaging/`, icon drawn by `packaging/IconGen.swift`, ten-slice `iconutil` set with the `sips` fallback per the Context trap.)
+- [x] Sign with `IDENTITY ?= Cataclysm`; `codesign --verify --strict build/Cataclysm.app` exits 0; `plutil -lint` passes on both plists; `make` and `make test` still exit 0. (All green; the `app` rule runs both lints and the strict verify itself.)
 
 ### Task 6: Startup order and onboarding
 
