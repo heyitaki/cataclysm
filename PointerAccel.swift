@@ -7,11 +7,11 @@
 //
 // Main-thread only, like the rest of the process. deinit does not run for a
 // global on process exit, so the owner must call restore() from its own exit
-// paths, the same way main.swift re-associates the cursor. Those paths must
-// reach it on the main thread: signal handlers via a main-queue dispatch
-// source (as main.swift already does), and atexit only from a main-thread
-// exit(), or a reassert tick still in flight can re-take the property after
-// restore() has released it.
+// paths, the same way CataclysmApp.swift re-associates the cursor. Those
+// paths must reach it on the main thread: signal handlers via a main-queue
+// dispatch source (as CataclysmApp.swift already does), and atexit only from
+// a main-thread exit(), or a reassert tick still in flight can re-take the
+// property after restore() has released it.
 
 import Cocoa
 

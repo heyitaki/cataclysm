@@ -1,7 +1,8 @@
 // Table-driven harness for the scroll rewrite pipeline (ScrollFilter.swift).
-// Covers every case in specs/pointer-and-scroll.md "Testing". Pure-function
-// cases assert exact output triples; the CGEvent cases assert field-write
-// order, which nothing visible distinguishes by eye.
+// Covers every case in the deleted design spec's "Testing" table (see
+// specs/progress.md). Pure-function cases assert exact output triples; the
+// CGEvent cases assert field-write order, which nothing visible
+// distinguishes by eye.
 //
 // Build and run: make test
 

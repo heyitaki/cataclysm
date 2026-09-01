@@ -1,6 +1,6 @@
 # Remaining work
 
-The two design specs (`pointer-and-scroll.md`, `distribution-and-ui.md`) are implemented and deleted; recover them from git history if needed. Implementation merged to `main` as `cf186f8` on 2026-09-01, from the ralphex run recorded in `docs/plans/completed/cataclysm-distribution.md`, whose Post-Completion section is the fuller version of the list below. `specs/evidence/verify.sh` is kept for the macOS floor pass: it re-checks the platform claims (Gatekeeper, iconutil, legacy launchd) the design relied on.
+The two design specs (`pointer-and-scroll.md`, `distribution-and-ui.md`) are implemented and deleted; recover them from git history if needed. Implementation merged to `main` as `cf186f8` on 2026-09-01, from the ralphex run recorded in `docs/plans/completed/cataclysm-distribution.md`, whose Post-Completion section is the fuller version of the list below. `specs/evidence/build/verify.sh` is kept for the macOS floor pass: it re-checks the platform claims (Gatekeeper, iconutil, legacy launchd) the design relied on.
 
 Everything below needs the user present; none of it is unattended-automatable.
 
