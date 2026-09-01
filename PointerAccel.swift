@@ -97,6 +97,13 @@ final class PointerAccel {
 
     var isActive: Bool { timer != nil }
 
+    // A released instance (disable() or restore() ran) whose write of the
+    // original failed, so the property still reads -1 with nobody
+    // reasserting it. writeFailing never covers this: exit-path writes are
+    // deliberately unreported, so the owner has to read it here or a panel
+    // reopen would show the feature as restored.
+    var restoreFailed: Bool { holding && timer == nil }
+
     // IOHIDEventSystemClientCreateSimpleClient can return null in degraded
     // contexts despite its nonnull annotation, and a null client fails every
     // call silently. The only reliable probe is whether a property read

@@ -359,7 +359,10 @@ final class AppRuntime {
     func refreshAccelHealth() {
         guard let pointerAccel else { return }
         state.accelUnresponsive = !pointerAccel.clientResponsive
-        state.accelWriteFailing = pointerAccel.writeFailing
+        // A failed disable() (setAccelerationOff) keeps the instance with
+        // its claim; writeFailing alone would read false and clear the
+        // failure the toggle showed, while the property is still -1.
+        state.accelWriteFailing = pointerAccel.writeFailing || pointerAccel.restoreFailed
     }
 
     // Called only after trust (Task 6 owns the ordering), so no agent is ever
@@ -704,7 +707,10 @@ final class AppRuntime {
         applyHotkey()
         syncLoginItem()
         if state.featuresRunning {
-            if settings.accelerationOff, pointerAccel == nil { startAcceleration() }
+            // No pointerAccel == nil gate: an instance kept by a failed
+            // disable() has no timer, and startAcceleration() is what
+            // rebuilds it (enable() is idempotent for a live one).
+            if settings.accelerationOff { startAcceleration() }
             refresh()
         }
     }
@@ -717,13 +723,18 @@ final class AppRuntime {
     // The clear is gated on every teardown step having actually taken
     // effect: a failed restore leaves the property at -1 with the stored
     // original as its only record, and a registration that survived would
-    // outlive the settings that know about it. On failure nothing is erased,
-    // the app keeps running, and the panel says what is still in place so a
-    // retry is possible. Every step is idempotent, so a retry only redoes
-    // what failed.
+    // outlive the settings that know about it. On failure the settings are
+    // kept, the steps that did succeed are redone from those settings (the
+    // agents re-registered, acceleration re-taken), the app keeps running,
+    // and the panel says what is still in place so a retry is possible.
+    // Every step is idempotent, so a retry only redoes what failed.
     func resetEverythingAndQuit() {
         var remaining: [String] = []
-        if let pointerAccel, !pointerAccel.restore() {
+        // disable(), not restore(): the steps below spin the main run loop
+        // (waitUntilExit in runLaunchctl), and a reassert tick landing there
+        // would re-take the property right before its stored original is
+        // erased.
+        if let pointerAccel, !pointerAccel.disable() {
             remaining.append("pointer acceleration could not be restored")
         }
         CGAssociateMouseAndMouseCursorPosition(1)
@@ -739,9 +750,18 @@ final class AppRuntime {
             remaining.append("the login item is still registered")
         }
         guard remaining.isEmpty else {
-            state.resetError = "Reset stopped, nothing erased: "
+            state.resetError = "Reset stopped, settings kept: "
                 + remaining.joined(separator: "; ")
-            refreshWatcherStatus()
+            // Undo the teardown that did succeed, under the same trust
+            // gate as startup: agents are only ever registered once trusted.
+            if state.trusted {
+                registerAgentsIfNeeded()
+                if state.featuresRunning, settings?.accelerationOff == true {
+                    startAcceleration()
+                }
+            } else {
+                refreshWatcherStatus()
+            }
             return
         }
         UserDefaults.standard.removePersistentDomain(
