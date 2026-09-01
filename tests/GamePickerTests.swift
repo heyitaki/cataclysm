@@ -40,6 +40,7 @@ struct GamePickerTests {
         labelTests()
         quitTransitionTests()
         pinnedTests()
+        tieBreakTests()
         noTargetTests()
         knownAppTests()
         print("\(passed) passed, \(failed) failed")
@@ -163,6 +164,18 @@ struct GamePickerTests {
             pinned: [GamePickerCandidate(bundleID: selfID, name: "Cataclysm")],
             running: [], ownBundleID: selfID)
         checkEq(own.count, 1, "pinned: own bundle excluded")
+    }
+
+    static func tieBreakTests() {
+        // Two same-named running apps: the bundle id breaks the tie, so a
+        // rebuild can never reorder them (the rows come out of a Dictionary
+        // whose iteration order is per-process random).
+        let rows = build([
+            GamePickerCandidate(bundleID: "com.example.b", name: "Twin"),
+            GamePickerCandidate(bundleID: "com.example.a", name: "Twin"),
+        ])
+        checkEq(rows.map(\.bundleID), [storedID, "com.example.a", "com.example.b"],
+                "order: name tie broken by bundle id")
     }
 
     static func noTargetTests() {

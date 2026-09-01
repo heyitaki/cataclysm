@@ -36,7 +36,7 @@ Cataclysm clamps and rewrites your own mouse input: it keeps the cursor inside t
 
 ## Uninstall
 
-Open the dropdown, turn off "Launch at login", and click "Quit Cataclysm". Quitting restores your mouse acceleration and reconnects the cursor. Then drag Cataclysm from Applications to the Trash; the crash-recovery helper runs from inside the app bundle, so it goes with it, and you can remove its entry under System Settings > General > Login Items if one remains.
+Open the dropdown, turn off "Launch at login", and click "Quit Cataclysm". Quitting restores your mouse acceleration and reconnects the cursor. Then drag Cataclysm from Applications to the Trash, and remove any leftover Cataclysm entry under System Settings > General > Login Items. If a file named `io.github.heyitaki.cataclysm.watch.plist` exists in `~/Library/LaunchAgents` (some installs use it for crash recovery), run `launchctl bootout gui/$(id -u)/io.github.heyitaki.cataclysm.watch` and delete the file.
 
 ## Building from source
 

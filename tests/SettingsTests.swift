@@ -231,6 +231,7 @@ struct SettingsTests {
         store.set(196_608, forKey: recoveryKey)
         store.set("keep", forKey: "future.unknownKey")
 
+        s.enabled = false
         s.resetToDefaults()
 
         checkEq(s.jailEnabled, true, "reset: jail back to default")

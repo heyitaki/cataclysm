@@ -125,7 +125,6 @@ final class SettingsModel: ObservableObject {
     @Published var invertVertical = true
     @Published var launchAtLogin = true
     @Published var mulThousandths = 1_000
-    @Published var targetName = ""
     @Published var targetBundleID = ""
     @Published var pickerRows: [GamePickerRow] = []
     @Published var invertHorizontal = false
@@ -203,6 +202,10 @@ final class AppRuntime {
         // trust; toggling while ungranted just flips the stored preference.
         hotkeyCenter.onHotkey = { [weak self] in
             guard let self else { return }
+            // Inert while the master switch is off, like the dimmed
+            // checkbox: a stray chord must not silently rewrite the stored
+            // preference behind a closed panel.
+            guard self.settings?.enabled != false else { return }
             self.setJailEnabled(!(self.settings?.jailEnabled ?? true))
         }
         applyHotkey()
@@ -269,7 +272,6 @@ final class AppRuntime {
         panel.invertVertical = settings.invertVertical
         panel.launchAtLogin = settings.launchAtLogin
         panel.mulThousandths = settings.mulThousandths
-        panel.targetName = settings.targetDisplayName
         panel.targetBundleID = settings.targetBundleID
         panel.invertHorizontal = settings.invertHorizontal
         panel.flattenNotches = settings.flattenNotches
@@ -302,11 +304,15 @@ final class AppRuntime {
                     bundleID: app.bundleIdentifier,
                     name: app.bundleIdentifier.flatMap(knownAppName(for:)) ?? app.localizedName)
             }
-        panel.pickerRows = buildGamePickerRows(
+        let rows = buildGamePickerRows(
             storedBundleID: stored,
             storedName: knownAppName(for: target) ?? settings.targetDisplayName,
             pinned: pinnedApps,
             running: running, ownBundleID: cataclysmBundleID)
+        // Rebuilds fire on every app launch and quit system-wide; an
+        // unchanged snapshot must not republish, or the whole panel
+        // re-renders (and re-resolves icons) for unrelated apps.
+        if rows != panel.pickerRows { panel.pickerRows = rows }
     }
 
     private func trustTick() {
@@ -688,6 +694,9 @@ final class AppRuntime {
         panel.enabled = on
         if on {
             if state.trusted { startFeatures() }
+            // A failed release latched accelWriteFailing; re-taking the
+            // property supersedes the failed restore, so re-read the truth.
+            refreshAccelHealth()
         } else {
             stopFeatures()
             releaseAcceleration()
@@ -707,7 +716,6 @@ final class AppRuntime {
         settings?.targetBundleID = bundleID
         settings?.targetDisplayName = name
         panel.targetBundleID = bundleID
-        panel.targetName = name
         gameBundle = bundleID
         rebuildGamePicker()
         if state.featuresRunning { refresh() }
@@ -864,6 +872,12 @@ final class AppRuntime {
         applySettings(settings)
         applyHotkey()
         syncLoginItem()
+        // The reset restores the master switch to on; if it was off, the
+        // features are torn down and reapplying settings alone would leave
+        // the panel claiming on over a dead runtime.
+        if settings.enabled, state.trusted, !state.featuresRunning {
+            startFeatures()
+        }
         if state.featuresRunning {
             // No pointerAccel == nil gate: an instance kept by a failed
             // disable() has no timer, and startAcceleration() is what
@@ -879,7 +893,6 @@ final class AppRuntime {
     // the signal: it is nonzero for a job that was never loaded, which is
     // the normal state of a plist whose bootstrap failed, so the job's
     // presence in launchd is probed instead before the file goes.
-    @discardableResult
     private func bootOutLegacyWatcher() -> String? {
         guard FileManager.default.fileExists(atPath: legacyWatcherPlistURL.path)
         else { return nil }
@@ -1403,14 +1416,19 @@ struct PanelView: View {
     private func featureToggle(_ title: String, isOn: Bool, failed: Bool,
                                unavailable: Bool? = nil, held: Bool? = nil,
                                set: @escaping (Bool) -> Void) -> some View {
-        let unavailable = (unavailable ?? !state.trusted) || !model.enabled
+        let unavailable = unavailable ?? !state.trusted
         let held = held ?? isOn
+        // Master switch off: rows dim but keep their stored checkmarks (the
+        // preferences are kept, and unchecked would read as cleared). The
+        // one exception stays live: a failed toggle that still holds an
+        // effect, whose click is the only retry of the failed release.
+        let masterOff = !model.enabled && !(failed && held)
         return staticRow {
             Toggle(title, isOn: Binding(
                 get: { isOn && !unavailable && !failed },
                 set: { value in set(failed ? false : value) }))
                 .toggleStyle(.checkbox)
-                .disabled(unavailable || (failed && !held))
+                .disabled(unavailable || (failed && !held) || masterOff)
             if failed {
                 Spacer()
                 Text("failed").font(.caption).foregroundStyle(.red)
@@ -1534,22 +1552,37 @@ struct PanelWindowStyle: NSViewRepresentable {
         DispatchQueue.main.async { view.window?.hasShadow = false }
         return view
     }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    // The deferred write above can race the view's window attachment; every
+    // later update retries the (idempotent) write in case it lost.
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.window?.hasShadow = false
+    }
 }
 
 // The one bezel every right-aligned control in the panel wears (stepper
 // buttons, the hotkey chord): a single height and corner radius so a column
 // of them lines up, unlike the mixed stock control sizes.
 struct BezelButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var enabled
-
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(minWidth: 20, minHeight: 22)
-            .background(RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(configuration.isPressed ? 0.22 : 0.1)))
-            .opacity(enabled ? 1 : 0.35)
-            .contentShape(Rectangle())
+        Bezel(configuration: configuration)
+    }
+
+    // A ButtonStyle is not a View, so an @Environment stored on the style
+    // itself never resolves and reads its default (true); the body lives in
+    // a nested View where the environment is real.
+    private struct Bezel: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var enabled
+
+        var body: some View {
+            configuration.label
+                .frame(minWidth: 20, minHeight: 22)
+                .background(RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.22 : 0.1)))
+                .opacity(enabled ? 1 : 0.35)
+                .contentShape(Rectangle())
+        }
     }
 }
 
@@ -1570,10 +1603,7 @@ struct MenuRow: View {
     private var highlighted: Bool { hovering && enabled }
 
     var body: some View {
-        // Clearing the hover first: a command that hands focus to another app
-        // dismisses the panel with the pointer still over this row, so no
-        // exit event arrives and the highlight would survive to the next open.
-        Button(action: { hovering = false; action() }) {
+        Button(action: action) {
             HStack(spacing: 6) {
                 if let leadingSymbol { symbol(leadingSymbol) }
                 Text(title).font(headline ? .headline : .body)
@@ -1593,6 +1623,11 @@ struct MenuRow: View {
         .background(RoundedRectangle(cornerRadius: menuHighlightRadius)
             .fill(highlighted ? Color.accentColor : Color.clear))
         .onHover { hovering = $0 }
+        // A dismissal with the pointer still over the row (its own action
+        // handing focus away, Escape, another app taking key) delivers no
+        // exit event, and @State survives the close, so the highlight would
+        // come back painted on the next open.
+        .onDisappear { hovering = false }
         .accessibilityLabel(title)
     }
 

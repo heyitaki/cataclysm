@@ -49,10 +49,23 @@ app: build/cataclysm build/Cataclysm.icns packaging/Info.plist.in packaging/$(BU
 	codesign --verify --strict $(APP)
 
 # Local install: Spotlight and Raycast index /Applications, the repo's build
-# directory is invisible to both. A running copy is quit first so the
-# instance lock does not refuse the new one.
+# directory is invisible to both. A running copy is quit first (only if
+# actually running: an AppleScript quit launches the app when it is not) and
+# the exit is verified before the delete, because removing the bundle under
+# a live process leaves it holding the instance lock and the fresh copy
+# refusing to launch.
+INSTALLED_PROC = /Applications/Cataclysm.app/Contents/MacOS/cataclysm$$$$
 install: app
-	-osascript -e 'tell application "Cataclysm" to quit' >/dev/null 2>&1
+	@if pgrep -qf '$(INSTALLED_PROC)'; then \
+		osascript -e 'tell application "Cataclysm" to quit' >/dev/null 2>&1 || true; \
+		for i in 1 2 3 4 5 6 7 8 9 10; do \
+			pgrep -qf '$(INSTALLED_PROC)' || break; sleep 0.5; \
+		done; \
+		if pgrep -qf '$(INSTALLED_PROC)'; then \
+			echo 'make install: the running Cataclysm did not quit (Automation permission?); quit it manually and retry'; \
+			exit 1; \
+		fi; \
+	fi
 	rm -rf /Applications/Cataclysm.app
 	ditto $(APP) /Applications/Cataclysm.app
 

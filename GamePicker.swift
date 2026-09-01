@@ -89,7 +89,12 @@ func buildGamePickerRows(storedBundleID: String?, storedName: String,
         head.append(runningByID.removeValue(forKey: id)
             ?? GamePickerRow(bundleID: id, name: name, label: name, isRunning: false))
     }
-    if let storedBundleID { pin(storedBundleID, storedName) }
+    // Same guards as the loops below: the settings accessors keep these
+    // unreachable today, but the function's own contract should not rely on
+    // that (an empty id would collide with the chooser row's tag).
+    if let storedBundleID, !storedBundleID.isEmpty, storedBundleID != ownBundleID {
+        pin(storedBundleID, storedName.isEmpty ? storedBundleID : storedName)
+    }
     for app in pinned {
         guard let id = app.bundleID, !id.isEmpty, id != ownBundleID else { continue }
         pin(id, app.name.flatMap { $0.isEmpty ? nil : $0 } ?? id)
