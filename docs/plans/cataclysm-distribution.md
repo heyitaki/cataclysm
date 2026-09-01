@@ -61,9 +61,9 @@ Traps already paid for, do not rediscover:
 
 ### Task 3: Wire the scroll filter tap into the CLI
 
-- [ ] Read `specs/pointer-and-scroll.md` phase 2. Add a separate `.tailAppendEventTap` for `scrollWheel` dispatching to `decideScrollEvent` before any jail code runs, honoring the Context traps (seconds conversion, nil-return swallow, long-lived state, per-axis flatten pairing, field accessor types).
-- [ ] CLI flags for invert vertical, invert horizontal, flatten, lines per notch, multiplier, and alternate trackpad detection (default off), clamped through the existing clamp helpers; `--dump-scroll` prints each raw event's fields and the decision to stdout.
-- [ ] `make` and `make test` exit 0; both `-target` typechecks pass. Never run the binary.
+- [x] Read `specs/pointer-and-scroll.md` phase 2. Add a separate `.tailAppendEventTap` for `scrollWheel` dispatching to `decideScrollEvent` before any jail code runs, honoring the Context traps (seconds conversion, nil-return swallow, long-lived state, per-axis flatten pairing, field accessor types). (Tap lives in `TapHost.swift`; disjoint masks keep wheel events out of the jail callback entirely.)
+- [x] CLI flags for invert vertical, invert horizontal, flatten, lines per notch, multiplier, and alternate trackpad detection (default off), clamped through the existing clamp helpers; `--dump-scroll` prints each raw event's fields and the decision to stdout. (Flags: `--scroll --no-invert-vertical --invert-horizontal --no-flatten --lines --multiplier --alt-trackpad --dump-scroll`; any of them enables the scroll tap, defaults match the spec.)
+- [x] `make` and `make test` exit 0; both `-target` typechecks pass. Never run the binary.
 
 ### Task 4: Settings store with clamped load
 

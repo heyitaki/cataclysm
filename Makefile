@@ -7,7 +7,7 @@ DEST = $(HS_DIR)/mousejail/$(BINARY)
 .DELETE_ON_ERROR:
 
 # Explicit source list: a *.swift glob breaks once a second entry point exists.
-CLI_SOURCES = main.swift Jail.swift TapHost.swift PointerAccel.swift
+CLI_SOURCES = main.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift
 
 $(BINARY): $(CLI_SOURCES) Bridging.h
 	xcrun swiftc -O -import-objc-header Bridging.h $(CLI_SOURCES) -o $(BINARY)
