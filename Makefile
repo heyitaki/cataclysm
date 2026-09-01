@@ -7,10 +7,10 @@ DEST = $(HS_DIR)/mousejail/$(BINARY)
 .DELETE_ON_ERROR:
 
 # Explicit source list: a *.swift glob breaks once a second entry point exists.
-CLI_SOURCES = main.swift Jail.swift TapHost.swift
+CLI_SOURCES = main.swift Jail.swift TapHost.swift PointerAccel.swift
 
-$(BINARY): $(CLI_SOURCES)
-	xcrun swiftc -O $(CLI_SOURCES) -o $(BINARY)
+$(BINARY): $(CLI_SOURCES) Bridging.h
+	xcrun swiftc -O -import-objc-header Bridging.h $(CLI_SOURCES) -o $(BINARY)
 
 # Replace by rename, never by writing over the destination: the helper is
 # executing that file, and rewriting its pages under it can kill it.

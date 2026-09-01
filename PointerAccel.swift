@@ -97,6 +97,16 @@ final class PointerAccel {
 
     var isActive: Bool { timer != nil }
 
+    // IOHIDEventSystemClientCreateSimpleClient can return null in degraded
+    // contexts despite its nonnull annotation, and a null client fails every
+    // call silently. The only reliable probe is whether a property read
+    // round-trips at all; callers gate their "acceleration control is on"
+    // report on this rather than on enable() having been called.
+    var clientResponsive: Bool {
+        if case .unavailable = read() { return false }
+        return true
+    }
+
     // Overwrite the property and hold it there until disable(). Idempotent.
     func enable() {
         dispatchPrecondition(condition: .onQueue(.main))

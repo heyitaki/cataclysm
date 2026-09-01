@@ -55,9 +55,9 @@ Traps already paid for, do not rediscover:
 
 ### Task 2: Wire pointer acceleration into the CLI
 
-- [ ] Read `specs/pointer-and-scroll.md` phase 1. Wire `PointerAccel` into `main.swift` behind the flag that spec names (its choice wins; `--no-accel` only if it names none), default off. Include the 5s reassert timer and `didWakeNotification` reassert via the module API, and the null-client read round-trip check before reporting the feature active.
-- [ ] Every exit path (signal handlers, clean exit) calls `restore()` before the process dies.
-- [ ] Build gains `-import-objc-header Bridging.h` and `PointerAccel.swift` with prerequisites updated in the same edit; `make` and `make test` exit 0; also verify both `xcrun swiftc -typecheck -target arm64-apple-macos13.0` and `-target x86_64-apple-macos13.0` pass on the CLI source list. Never run the binary.
+- [x] Read `specs/pointer-and-scroll.md` phase 1. Wire `PointerAccel` into `main.swift` behind the flag that spec names (its choice wins; `--no-accel` only if it names none), default off. Include the 5s reassert timer and `didWakeNotification` reassert via the module API, and the null-client read round-trip check before reporting the feature active. (Spec names no CLI flag, so the flag is `--no-accel`; the round-trip check is a new `clientResponsive` probe on `PointerAccel`.)
+- [x] Every exit path (signal handlers, clean exit) calls `restore()` before the process dies.
+- [x] Build gains `-import-objc-header Bridging.h` and `PointerAccel.swift` with prerequisites updated in the same edit; `make` and `make test` exit 0; also verify both `xcrun swiftc -typecheck -target arm64-apple-macos13.0` and `-target x86_64-apple-macos13.0` pass on the CLI source list. Never run the binary.
 
 ### Task 3: Wire the scroll filter tap into the CLI
 
