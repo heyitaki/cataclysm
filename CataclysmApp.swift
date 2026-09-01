@@ -89,6 +89,13 @@ final class AppState: ObservableObject {
     // The HID client never round-tripped a read: nothing is actually held,
     // so the feature must not present as on.
     @Published var accelUnresponsive = false
+    // The acceleration property is actually taken (startAcceleration ran and
+    // was not torn down). Distinct from the stored preference: on an
+    // ungranted first launch the preference is on but startup step 6 has not
+    // applied it yet, and the toggle must read unavailable, not checked. A
+    // lost grant keeps the property held (stopFeatures leaves it alone), so
+    // !trusted on its own cannot stand in for this.
+    @Published var accelHeld = false
     @Published var watcherRegistered = false
     @Published var watcherRequiresApproval = false
     // register() threw (SMAppService path) and the legacy bootstrap failed
@@ -330,6 +337,7 @@ final class AppRuntime {
         // (enable()'s timer keeps retrying).
         state.accelUnresponsive = !accel.clientResponsive
         pointerAccel = accel
+        state.accelHeld = true
     }
 
     // Re-probe on panel open: a HID client that recovers without ever passing
@@ -398,10 +406,18 @@ final class AppRuntime {
                 // stray Login Item.
                 bootOutLegacyWatcher()
             } catch {
-                // SMAppService refused (the self-signed identity, or
-                // anything else): fall back to the mechanism it replaced,
-                // which has no code-signing requirement at all.
-                if let failure = installLegacyWatcher() {
+                // register() also throws while the agent sits in Login
+                // Items awaiting approval or switched off there. That is
+                // the user's decision: never route around it with the
+                // legacy job, which needs no approval at all.
+                // refreshWatcherStatus() below surfaces the approval row.
+                if agent.status == .requiresApproval {
+                    state.watcherError = nil
+                } else if let failure = installLegacyWatcher() {
+                    // SMAppService refused outright (the self-signed
+                    // identity, or anything else): fall back to the
+                    // mechanism it replaced, which has no code-signing
+                    // requirement, and surface a double failure.
                     state.watcherError = "Crash recovery failed: "
                         + "\(error.localizedDescription); \(failure)"
                 } else {
@@ -546,6 +562,7 @@ final class AppRuntime {
             // the off half must not wait for featuresRunning.
             pointerAccel?.disable()
             pointerAccel = nil
+            state.accelHeld = false
             state.accelWriteFailing = false
             state.accelUnresponsive = false
         }
@@ -982,11 +999,15 @@ struct PanelView: View {
         }
     }
 
+    // Unavailable while ungranted only until the property is actually taken:
+    // step 6 defers the first write to trust, so a checked toggle before then
+    // would claim a curve that is still accelerating. Once held, a lost grant
+    // does not release the property, so the toggle stays live.
     private var accelToggle: some View {
         featureToggle("Mouse acceleration off",
                       isOn: model.accelOff,
                       failed: accelFailed,
-                      unavailable: false,
+                      unavailable: !state.trusted && !state.accelHeld,
                       set: { AppRuntime.shared.setAccelerationOff($0) })
     }
 
