@@ -34,12 +34,20 @@ final class InstanceLock {
         let dir = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true)
-        let openFd = open(path, O_CREAT | O_RDWR, 0o644)
+        // O_CLOEXEC: the relaunch helper must not inherit the descriptor,
+        // or the instance it opens loses the lock contest to a dead process.
+        let openFd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
         guard openFd >= 0 else {
             openFailure = "\(path): \(String(cString: strerror(errno)))"
             return false
         }
         guard flock(openFd, LOCK_EX | LOCK_NB) == 0 else {
+            // Only EWOULDBLOCK means another live holder; anything else (a
+            // filesystem without flock, say) is an environment failure and
+            // must not read as "already running".
+            if errno != EWOULDBLOCK {
+                openFailure = "\(path): \(String(cString: strerror(errno)))"
+            }
             close(openFd)
             return false
         }

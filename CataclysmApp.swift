@@ -488,6 +488,11 @@ final class AppRuntime {
                 // legacy job, which needs no approval at all.
                 // refreshWatcherStatus() below surfaces the approval row.
                 if agent.status == .requiresApproval {
+                    // Recorded so later launches stop repeating the bootout
+                    // and throw for a version already reconciled; a
+                    // re-enable in Login Items launches from the bundle and
+                    // needs no re-register for this version.
+                    settings.lastRegisteredVersion = version
                     state.watcherError = nil
                 } else if let failure = installLegacyWatcher() {
                     // SMAppService refused outright (the self-signed
@@ -640,6 +645,15 @@ final class AppRuntime {
         let status = SMAppService.agent(plistName: watcherPlistName).status
         state.watcherRequiresApproval = status == .requiresApproval
         state.watcherRegistered = status == .enabled || legacyWatcherLoaded()
+    }
+
+    // Read-only counterpart of syncLoginItem for panel open: a switch-off in
+    // System Settings otherwise stays invisible until the checkbox is next
+    // toggled. Registers and unregisters nothing.
+    func refreshLoginItemStatus() {
+        guard let settings else { return }
+        state.loginItemRequiresApproval =
+            settings.launchAtLogin && SMAppService.mainApp.status == .requiresApproval
     }
 
     private func legacyWatcherLoaded() -> Bool {
@@ -863,10 +877,28 @@ final class AppRuntime {
         CGAssociateMouseAndMouseCursorPosition(1)
         let agent = SMAppService.agent(plistName: watcherPlistName)
         try? agent.unregister()
-        if agent.status == .enabled || agent.status == .requiresApproval {
+        if agent.status == .requiresApproval {
             remaining.append("the crash-recovery agent is still registered")
         }
         if let failure = bootOutLegacyWatcher() { remaining.append(failure) }
+        // BTM keys launch items by label: freeing it with the legacy bootout
+        // lets smd re-submit the agent's record within about a second
+        // (measured; SmokeGate.noTraceLeft defends the same race). The exit
+        // below must not outrun that, so poll and re-unregister until the
+        // record stays gone. usleep rather than the run loop, so the refresh
+        // timer cannot fire mid-teardown.
+        var agentGone = false
+        for _ in 0..<6 {
+            if agent.status == .enabled { try? agent.unregister() }
+            agentGone = agent.status != .enabled
+                && runLaunchctl(
+                    ["print", "gui/\(getuid())/\(legacyWatcherLabel)"]).code != 0
+            if agentGone { break }
+            usleep(500_000)
+        }
+        if !agentGone {
+            remaining.append("the crash-recovery agent re-registered itself")
+        }
         try? SMAppService.mainApp.unregister()
         if SMAppService.mainApp.status == .enabled
             || SMAppService.mainApp.status == .requiresApproval {
@@ -889,6 +921,13 @@ final class AppRuntime {
         }
         UserDefaults.standard.removePersistentDomain(
             forName: Bundle.main.bundleIdentifier ?? cataclysmBundleID)
+        // The unbundled CLI's domain still holds the migrated recovery
+        // value; left behind, the next launch re-imports what was just
+        // erased. And exit(0) bypasses AppKit teardown while preference
+        // writes reach cfprefsd asynchronously, so flush before exiting.
+        UserDefaults.standard.removePersistentDomain(
+            forName: Settings.legacyDomainName)
+        UserDefaults.standard.synchronize()
         exit(0)
     }
 
@@ -1103,6 +1142,7 @@ struct PanelView: View {
     // dismisses on outside clicks and live preview is impossible anyway.
     @State private var sliderPos = 0.0
     @State private var draggingSlider = false
+    @State private var dragStartPos = 0.0
 
     // Ungranted: both taps are down, so the jail and the scroll filter read
     // unavailable rather than on. The acceleration property needs no grant
@@ -1138,6 +1178,7 @@ struct PanelView: View {
         .onAppear {
             AppRuntime.shared.reloadPanel()
             AppRuntime.shared.refreshWatcherStatus()
+            AppRuntime.shared.refreshLoginItemStatus()
             AppRuntime.shared.refreshAccelHealth()
             sliderPos = sliderPosition(
                 forMultiplier: Double(model.mulThousandths) / 1_000)
@@ -1187,6 +1228,7 @@ struct PanelView: View {
             featureToggle("Lock cursor to game window",
                           isOn: model.jailEnabled,
                           failed: jailFailed,
+                          held: false,
                           set: { AppRuntime.shared.setJailEnabled($0) })
             gameRow.padding(.leading, 18)
         }
@@ -1238,9 +1280,13 @@ struct PanelView: View {
     private var scrollSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             accelToggle
+            // A downed tap holds nothing a click could undo, so these
+            // tap-backed toggles pass held: false and disable while failed;
+            // only the acceleration toggle keeps a live retry (accelHeld).
             featureToggle("Invert wheel scrolling",
                           isOn: model.invertVertical,
                           failed: scrollFailed,
+                          held: false,
                           set: { AppRuntime.shared.setInvertVertical($0) })
             sliderRow
         }
@@ -1298,6 +1344,7 @@ struct PanelView: View {
         return HStack(spacing: 6) {
             Text("Scroll speed")
             Slider(value: $sliderPos, in: sliderPositionRange) { editing in
+                if editing { dragStartPos = sliderPos }
                 draggingSlider = editing
                 if !editing { commitSlider() }
             }
@@ -1316,6 +1363,10 @@ struct PanelView: View {
     }
 
     private func commitSlider() {
+        // An untouched thumb writes nothing: a stored value outside the
+        // slider's range parks at the nearer end by design, and committing
+        // that park would collapse the legal stored value to the bound.
+        guard sliderPos != dragStartPos else { return }
         let thousandths = mulThousandths(
             forMultiplier: multiplier(forSliderPosition: sliderPos))
         AppRuntime.shared.setMulThousandths(thousandths)
@@ -1334,10 +1385,12 @@ struct PanelView: View {
                     featureToggle("Invert horizontal scrolling",
                                   isOn: model.invertHorizontal,
                                   failed: scrollFailed,
+                                  held: false,
                                   set: { AppRuntime.shared.setInvertHorizontal($0) })
                     featureToggle("Flatten scroll notches",
                                   isOn: model.flattenNotches,
                                   failed: scrollFailed,
+                                  held: false,
                                   set: { AppRuntime.shared.setFlattenNotches($0) })
                     stepperRow("Lines per notch",
                                value: model.linesPerNotch, range: 1...1000,
@@ -1346,6 +1399,7 @@ struct PanelView: View {
                     featureToggle("Alternate trackpad detection",
                                   isOn: model.altTrackpadDetection,
                                   failed: scrollFailed,
+                                  held: false,
                                   set: { AppRuntime.shared.setAltTrackpadDetection($0) })
                 }
                 HotkeyRow(state: state, model: model)

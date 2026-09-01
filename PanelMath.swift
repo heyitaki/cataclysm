@@ -33,7 +33,9 @@ func mulThousandths(forMultiplier multiplier: Double) -> Int {
 }
 
 // Two-decimal readout; rendered with .monospacedDigit() so the panel never
-// shifts as the number changes.
+// shifts as the number changes. Below 0.01x (reachable only by hand-edited
+// plists) two decimals would read as "off", so those keep three.
 func multiplierLabel(forThousandths thousandths: Int) -> String {
-    String(format: "%.2fx", Double(thousandths) / 1_000)
+    let value = Double(thousandths) / 1_000
+    return String(format: value < 0.01 ? "%.3fx" : "%.2fx", value)
 }

@@ -47,7 +47,7 @@ final class SmokeGate {
         installSignalGuard()
         defer { cleanup() }
         guard step("acquire instance lock", lock.acquire(),
-                   detail: "another instance holds \(lockPath)")
+                   detail: lock.openFailure ?? "another instance holds \(lockPath)")
         else { return 1 }
         lockHeld = true
         // The gate registers and unregisters the same agent the shipping app

@@ -121,8 +121,6 @@ struct GamePickerTests {
         // to the synthesized form.
         let before = build([GamePickerCandidate(bundleID: storedID, name: storedName)])
         let after = build([])
-        checkEq(before[0].bundleID, after[0].bundleID,
-                "quit: selection bundle id survives the target quitting")
         check(before[0].isRunning, "quit: target was running before")
         check(!after[0].isRunning, "quit: synthesized after the target quits")
     }

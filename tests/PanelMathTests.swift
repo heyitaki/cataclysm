@@ -73,8 +73,9 @@ struct PanelMathTests {
         checkEq(multiplierLabel(forThousandths: 1_000), "1.00x", "label: default")
         checkEq(multiplierLabel(forThousandths: 250), "0.25x", "label: slider minimum")
         checkEq(multiplierLabel(forThousandths: 50_000), "50.00x", "label: beyond the slider")
-        // The readout is two decimals by design, so the extreme legal stored
-        // value displays as 0.00x while the slider parks at 0.25x.
-        checkEq(multiplierLabel(forThousandths: 1), "0.00x", "label: stored 0.001 rounds to 0.00x")
+        // Below 0.01x the readout keeps three decimals so a tiny legal
+        // stored value never reads as "off".
+        checkEq(multiplierLabel(forThousandths: 1), "0.001x", "label: stored 0.001 keeps three decimals")
+        checkEq(multiplierLabel(forThousandths: 10), "0.01x", "label: 0.01 stays two decimals")
     }
 }

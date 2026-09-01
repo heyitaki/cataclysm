@@ -240,7 +240,9 @@ struct SettingsTests {
         checkEq(s.linesPerNotch, 1, "reset: lines back to default")
         checkEq(s.targetBundleID, "com.riotgames.LeagueofLegends.GameClient",
                 "reset: target back to default")
-        check(s.lastRegisteredVersion == nil, "reset: registered version cleared")
+        // Bookkeeping, not a preference: clearing it would force a watcher
+        // re-register cycle (and its uncovered probe window) on next launch.
+        check(s.lastRegisteredVersion != nil, "reset: spares registered version")
         check(store.object(forKey: Settings.Key.jailEnabled) == nil,
               "reset: removes keys rather than writing defaults")
         checkEq(store.object(forKey: recoveryKey) as? Int, 196_608,

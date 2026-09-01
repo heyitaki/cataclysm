@@ -33,13 +33,15 @@ final class Settings {
         static let launchAtLogin = "app.launchAtLogin"
         static let lastRegisteredVersion = "app.lastRegisteredVersion"
 
-        // Everything resetToDefaults() erases. recovery.-prefixed keys are
-        // not preferences and must never appear here.
+        // Everything resetToDefaults() erases. recovery.-prefixed keys and
+        // lastRegisteredVersion are bookkeeping, not preferences: erasing
+        // the version would force a needless watcher re-register cycle with
+        // its 10s uncovered probe window on the next launch.
         static let all = [
             jailEnabled, targetBundleID, targetDisplayName, cornerRadius,
             accelerationOff, invertVertical, invertHorizontal, flattenNotches,
             linesPerNotch, mulThousandths, altTrackpadDetection,
-            hotkeyKeyCode, hotkeyModifiers, launchAtLogin, lastRegisteredVersion,
+            hotkeyKeyCode, hotkeyModifiers, launchAtLogin,
         ]
     }
 
