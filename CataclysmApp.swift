@@ -68,6 +68,9 @@ final class AppState: ObservableObject {
     @Published var watcherRegistered = false
     @Published var watcherRequiresApproval = false
     @Published var loginItemError: String?
+    // RegisterEventHotKey refused the chord (another app owns it). Shows in
+    // the hotkey row rather than leaving a recorded chord that does nothing.
+    @Published var hotkeyRegistrationFailed = false
 }
 
 // Mirror of the stored settings the panel binds to. AppRuntime is the only
@@ -83,6 +86,13 @@ final class SettingsModel: ObservableObject {
     @Published var targetName = ""
     @Published var targetBundleID = ""
     @Published var pickerRows: [GamePickerRow] = []
+    @Published var invertHorizontal = false
+    @Published var flattenNotches = true
+    @Published var linesPerNotch = 1
+    @Published var altTrackpadDetection = false
+    @Published var cornerRadiusSetting = Settings.Default.cornerRadius
+    @Published var hotkeyKeyCode = Settings.Default.hotkeyKeyCode
+    @Published var hotkeyModifiers = Settings.Default.hotkeyModifiers
 }
 
 // MARK: - Startup sequence and feature lifecycle
@@ -95,6 +105,7 @@ final class AppRuntime {
     private let lock: InstanceLock
     private var settings: Settings?
     private var pointerAccel: PointerAccel?
+    private let hotkeyCenter = HotkeyCenter()
     private var refreshTimer: Timer?
     private var trustTimer: Timer?
     private var activationObserver: NSObjectProtocol?
@@ -134,6 +145,13 @@ final class AppRuntime {
         let loaded = Settings()
         settings = loaded
         applySettings(loaded)
+        // The hotkey needs no Accessibility grant, so it registers before
+        // trust; toggling while ungranted just flips the stored preference.
+        hotkeyCenter.onHotkey = { [weak self] in
+            guard let self else { return }
+            self.setJailEnabled(!(self.settings?.jailEnabled ?? true))
+        }
+        applyHotkey()
         installExitRestorers()
         state.trusted = AXIsProcessTrusted()
         if state.trusted {
@@ -190,6 +208,13 @@ final class AppRuntime {
         panel.mulThousandths = settings.mulThousandths
         panel.targetName = settings.targetDisplayName
         panel.targetBundleID = settings.targetBundleID
+        panel.invertHorizontal = settings.invertHorizontal
+        panel.flattenNotches = settings.flattenNotches
+        panel.linesPerNotch = settings.linesPerNotch
+        panel.altTrackpadDetection = settings.altTrackpadDetection
+        panel.cornerRadiusSetting = settings.cornerRadius
+        panel.hotkeyKeyCode = settings.hotkeyKeyCode
+        panel.hotkeyModifiers = settings.hotkeyModifiers
         rebuildGamePicker()
     }
 
@@ -407,6 +432,116 @@ final class AppRuntime {
         syncLoginItem()
     }
 
+    func setInvertHorizontal(_ on: Bool) {
+        settings?.invertHorizontal = on
+        panel.invertHorizontal = on
+        applyScrollConfigs()
+    }
+
+    func setFlattenNotches(_ on: Bool) {
+        settings?.flattenNotches = on
+        panel.flattenNotches = on
+        applyScrollConfigs()
+    }
+
+    func setLinesPerNotch(_ lines: Int) {
+        settings?.linesPerNotch = lines
+        // Read back so the mirror carries what storage actually clamped to.
+        panel.linesPerNotch = settings?.linesPerNotch ?? lines
+        applyScrollConfigs()
+    }
+
+    func setAltTrackpadDetection(_ on: Bool) {
+        settings?.altTrackpadDetection = on
+        panel.altTrackpadDetection = on
+        applyScrollConfigs()
+    }
+
+    func setCornerRadius(_ radius: Double) {
+        settings?.cornerRadius = radius
+        panel.cornerRadiusSetting = settings?.cornerRadius ?? radius
+        cornerRadius = CGFloat(panel.cornerRadiusSetting)
+        // The clamp rebuilds from the global on the next refresh; force one so
+        // the new arc applies now rather than on the 0.5s tick.
+        if state.featuresRunning { refresh() }
+    }
+
+    // MARK: - Hotkey
+
+    // Persist first, then register: a chord another app owns still stores and
+    // displays, with the failure shown in the row (spec's recorder rules).
+    func setHotkey(keyCode: Int, modifiers: Int) {
+        settings?.hotkeyKeyCode = keyCode
+        settings?.hotkeyModifiers = modifiers
+        panel.hotkeyKeyCode = keyCode
+        panel.hotkeyModifiers = modifiers
+        applyHotkey()
+    }
+
+    // The recorder releases the registration while capturing: an active
+    // RegisterEventHotKey swallows its own chord globally, so re-recording
+    // the current chord would otherwise never reach either mechanism.
+    func beginHotkeyCapture() { hotkeyCenter.unregister() }
+    func endHotkeyCapture() { applyHotkey() }
+
+    private func applyHotkey() {
+        guard let settings else { return }
+        state.hotkeyRegistrationFailed = !hotkeyCenter.apply(
+            keyCode: settings.hotkeyKeyCode, modifiers: settings.hotkeyModifiers)
+    }
+
+    // MARK: - Resets
+
+    // "Reset to defaults" per the spec: erase chosen settings (never
+    // recovery.-prefixed keys; the store enforces that) and reapply the
+    // defaults immediately. For acceleration that means writing -1 again,
+    // not restoring: the default is on, so a running feature keeps holding
+    // and a stopped one starts.
+    func resetToDefaults() {
+        guard let settings else { return }
+        settings.resetToDefaults()
+        applySettings(settings)
+        applyHotkey()
+        syncLoginItem()
+        if state.featuresRunning {
+            if settings.accelerationOff, pointerAccel == nil { startAcceleration() }
+            refresh()
+        }
+    }
+
+    // Strict order from the spec: restore acceleration and re-associate the
+    // cursor BEFORE clearing UserDefaults, or the only record of the real
+    // acceleration value is destroyed while the live property is still -1.
+    // Then unregister the watcher agent and the login item (and boot out the
+    // legacy plist if one exists), then clear everything, then exit.
+    func resetEverythingAndQuit() -> Never {
+        pointerAccel?.restore()
+        CGAssociateMouseAndMouseCursorPosition(1)
+        try? SMAppService.agent(plistName: watcherPlistName).unregister()
+        bootOutLegacyWatcher()
+        try? SMAppService.mainApp.unregister()
+        UserDefaults.standard.removePersistentDomain(
+            forName: Bundle.main.bundleIdentifier ?? cataclysmBundleID)
+        exit(0)
+    }
+
+    // The legacy fallback (Task 10) writes ~/Library/LaunchAgents/<label>.plist
+    // when SMAppService refuses the self-signed identity; "Reset everything"
+    // has to boot it out and delete the file even before that task lands,
+    // since a prior build may have written it.
+    private func bootOutLegacyWatcher() {
+        let label = "\(cataclysmBundleID).watch"
+        let plist = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+        guard FileManager.default.fileExists(atPath: plist.path) else { return }
+        let bootout = Process()
+        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        bootout.arguments = ["bootout", "gui/\(getuid())/\(label)"]
+        try? bootout.run()
+        bootout.waitUntilExit()
+        try? FileManager.default.removeItem(at: plist)
+    }
+
     private func applyScrollConfigs() {
         guard let settings else { return }
         scrollVerticalConfig = settings.verticalScrollConfig
@@ -599,6 +734,8 @@ struct PanelView: View {
             Divider()
             scrollSection
             Divider()
+            advancedSection
+            Divider()
             footer
         }
         .padding(12)
@@ -772,6 +909,69 @@ struct PanelView: View {
             forMultiplier: Double(AppRuntime.shared.panel.mulThousandths) / 1_000)
     }
 
+    // The Advanced group (spec "The dropdown"): collapsed by default, holding
+    // the knobs a player has no reason to touch. Scroll knobs share the
+    // slider's disabled rule; the hotkey row, corner radius, and the commands
+    // stay live because they are preference writes, not tap-dependent.
+    private var advancedSection: some View {
+        DisclosureGroup("Advanced") {
+            VStack(alignment: .leading, spacing: 6) {
+                Group {
+                    featureToggle("Invert horizontal scrolling",
+                                  isOn: model.invertHorizontal,
+                                  failed: scrollFailed,
+                                  set: { AppRuntime.shared.setInvertHorizontal($0) })
+                    featureToggle("Flatten scroll notches",
+                                  isOn: model.flattenNotches,
+                                  failed: scrollFailed,
+                                  set: { AppRuntime.shared.setFlattenNotches($0) })
+                    stepperRow("Lines per notch",
+                               value: model.linesPerNotch, range: 1...1000,
+                               set: { AppRuntime.shared.setLinesPerNotch($0) })
+                        .disabled(!state.trusted || scrollFailed)
+                    featureToggle("Alternate trackpad detection",
+                                  isOn: model.altTrackpadDetection,
+                                  failed: scrollFailed,
+                                  set: { AppRuntime.shared.setAltTrackpadDetection($0) })
+                }
+                HotkeyRow(state: state, model: model)
+                stepperRow("Corner radius",
+                           value: Int(model.cornerRadiusSetting), range: 0...200,
+                           set: { AppRuntime.shared.setCornerRadius(Double($0)) })
+                    .help("Radius of the jail's rounded corners; 0 disables corner clamping")
+                Divider()
+                Button("Check for updates…") {
+                    // The repo renames to cataclysm post-release; GitHub
+                    // redirects the old URL, so this link survives it.
+                    let releases = "https://github.com/heyitaki/mousejail/releases"
+                    if let url = URL(string: releases) { NSWorkspace.shared.open(url) }
+                }
+                Button("Reset to defaults") {
+                    AppRuntime.shared.resetToDefaults()
+                    // sliderPos is view-local drag state; resync it to the
+                    // freshly reset stored multiplier.
+                    sliderPos = sliderPosition(forMultiplier:
+                        Double(AppRuntime.shared.panel.mulThousandths) / 1_000)
+                }
+                Button("Reset everything and quit") {
+                    AppRuntime.shared.resetEverythingAndQuit()
+                }
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    private func stepperRow(_ title: String, value: Int, range: ClosedRange<Int>,
+                            set: @escaping (Int) -> Void) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text("\(value)").monospacedDigit()
+            Stepper(title, value: Binding(get: { value }, set: set), in: range)
+                .labelsHidden()
+        }
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             Toggle("Launch at login", isOn: Binding(
@@ -783,6 +983,100 @@ struct PanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Button("Quit") { AppRuntime.shared.quit() }
+        }
+    }
+}
+
+// MARK: - Hotkey recorder
+
+// The jail toggle hotkey row (spec's recorder rules). Mechanism 1 is a local
+// keyDown monitor installed while recording; mechanism 2 is the first-
+// responder KeyCaptureNSView sitting invisibly in the row, armed on the same
+// flag. Whichever fires first wins via the single handle() path. Two rules
+// hold on every exit: recording cancels keeping the previous chord when the
+// panel dismisses (onDisappear), and the monitor and responder are torn down
+// on that same path, so a dismissed panel leaves nothing capturing keys.
+struct HotkeyRow: View {
+    @ObservedObject var state: AppState
+    @ObservedObject var model: SettingsModel
+    @State private var recording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        HStack {
+            Text("Jail toggle hotkey")
+            if state.hotkeyRegistrationFailed {
+                Text("in use by another app").font(.caption).foregroundStyle(.red)
+            }
+            Spacer()
+            KeyCapture(recording: recording, onKey: handle)
+                .frame(width: 0, height: 0)
+            Button(recording
+                    ? "Press keys… (Esc cancels)"
+                    : hotkeyChordLabel(keyCode: model.hotkeyKeyCode,
+                                       modifiers: model.hotkeyModifiers)) {
+                recording ? stopRecording() : startRecording()
+            }
+            .monospacedDigit()
+        }
+        .onDisappear { stopRecording() }
+    }
+
+    private func startRecording() {
+        recording = true
+        // Release the live registration so re-recording the current chord
+        // reaches the monitor instead of being swallowed globally.
+        AppRuntime.shared.beginHotkeyCapture()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            handle(event) ? nil : event
+        }
+    }
+
+    // Idempotent teardown shared by capture, cancel, and panel dismissal.
+    // Re-registers whatever chord is stored, which is the previous one unless
+    // handle() persisted a new one first.
+    private func stopRecording() {
+        guard recording else { return }
+        recording = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        AppRuntime.shared.endHotkeyCapture()
+    }
+
+    // Returns true when the event was consumed. Escape cancels; a press
+    // without a command-class modifier is swallowed but keeps recording, so
+    // stray typing neither beeps nor becomes a system-wide bare-key hotkey.
+    private func handle(_ event: NSEvent) -> Bool {
+        guard recording else { return false }
+        let mods = carbonModifiers(fromNSFlags: event.modifierFlags.rawValue)
+        if Int(event.keyCode) == escapeKeyCode, mods == 0 {
+            stopRecording()
+            return true
+        }
+        guard isValidHotkeyChord(modifiers: mods) else { return true }
+        AppRuntime.shared.setHotkey(keyCode: Int(event.keyCode), modifiers: mods)
+        stopRecording()
+        return true
+    }
+}
+
+// SwiftUI host for mechanism 2's NSView. Arming takes first responder on the
+// next runloop turn because the view may not be in a window yet on the first
+// update; disarming returns key focus to the window.
+struct KeyCapture: NSViewRepresentable {
+    let recording: Bool
+    let onKey: (NSEvent) -> Bool
+
+    func makeNSView(context: Context) -> KeyCaptureNSView { KeyCaptureNSView() }
+
+    func updateNSView(_ view: KeyCaptureNSView, context: Context) {
+        view.onKey = onKey
+        if recording {
+            DispatchQueue.main.async {
+                view.window?.makeFirstResponder(view)
+            }
+        } else if view.window?.firstResponder === view {
+            view.window?.makeFirstResponder(nil)
         }
     }
 }

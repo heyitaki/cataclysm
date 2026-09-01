@@ -98,9 +98,9 @@ Traps already paid for, do not rediscover:
 
 ### Task 9: Advanced group, hotkey, resets
 
-- [ ] `DisclosureGroup` collapsed by default with: invert horizontal, flatten notches, lines per notch, alternate trackpad detection, jail toggle hotkey row, corner radius (0-200, default 18, 0 disables corner clamping), Check for updates (opens the GitHub releases page), Reset to defaults, Reset everything and quit — the last two following the Context ordering rules exactly.
-- [ ] Hotkey recorder per spec: mechanism 1 (local `keyDown` monitor while key) with mechanism 2 (`NSViewRepresentable` first responder overriding `keyDown` and `performKeyEquivalent`) behind it; recording cancels keeping the previous chord on panel dismissal and tears down the monitor or responder on the same path; `RegisterEventHotKey` failure shows in the row; shipped default chord `cmd+alt+L`.
-- [ ] `make app` and `make test` exit 0.
+- [x] `DisclosureGroup` collapsed by default with: invert horizontal, flatten notches, lines per notch, alternate trackpad detection, jail toggle hotkey row, corner radius (0-200, default 18, 0 disables corner clamping), Check for updates (opens the GitHub releases page), Reset to defaults, Reset everything and quit — the last two following the Context ordering rules exactly.
+- [x] Hotkey recorder per spec: mechanism 1 (local `keyDown` monitor while key) with mechanism 2 (`NSViewRepresentable` first responder overriding `keyDown` and `performKeyEquivalent`) behind it; recording cancels keeping the previous chord on panel dismissal and tears down the monitor or responder on the same path; `RegisterEventHotKey` failure shows in the row; shipped default chord `cmd+alt+L`.
+- [x] `make app` and `make test` exit 0.
 
 ### Task 10: Watcher and registration
 
