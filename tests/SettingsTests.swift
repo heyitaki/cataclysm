@@ -1,8 +1,7 @@
 // Harness for the settings store (Settings.swift): defaults, every clamp
-// bound, wrong-type fallback, reset-to-defaults sparing recovery. keys, and
-// the one-time legacy-domain migration. Every store points at a scratch
-// UserDefaults(suiteName:), never .standard, so runs are hermetic and the
-// real legacy CLI domain is never touched.
+// bound, wrong-type fallback, and reset-to-defaults sparing recovery. keys.
+// Every store points at a scratch UserDefaults(suiteName:), never .standard,
+// so runs are hermetic.
 //
 // Build and run: make test
 
@@ -24,7 +23,6 @@ func checkEq<T: Equatable>(_ got: T, _ want: T, _ name: String) {
 }
 
 let recoveryKey = "recovery.originalMouseAcceleration"
-let markerKey = "recovery.migratedFromLegacyDomain"
 
 var scratchSuites: [String] = []
 
@@ -61,7 +59,6 @@ struct SettingsTests {
         clampTests()
         hotkeyTests()
         resetTests()
-        migrationTests()
         cleanup()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
@@ -69,7 +66,7 @@ struct SettingsTests {
 
     static func defaultsTests() {
         let store = scratch("defaults")
-        let s = Settings(defaults: store, legacy: nil)
+        let s = Settings(defaults: store)
         checkEq(s.enabled, true, "default: master switch on")
         checkEq(s.jailEnabled, true, "default: jail enabled")
         checkEq(s.targetBundleID, "com.riotgames.LeagueofLegends.GameClient",
@@ -91,18 +88,17 @@ struct SettingsTests {
         check(Settings.Key.all.allSatisfy { !$0.hasPrefix("recovery.") },
               "no recovery. key is a preference")
 
-        // Reads never write anything back into an untouched domain (the
-        // migration marker is the one deliberate exception). The nil coalesce
-        // is a sentinel, not empty: a missing domain would mean the check
-        // inspected nothing and must fail rather than pass vacuously.
+        // Reads never write anything back into an untouched domain. A
+        // missing domain is the expected state: the plist only comes into
+        // existence on the first write.
         let residue = store.persistentDomain(forName: scratchSuiteName("defaults"))?
-            .keys.filter { $0 != markerKey } ?? ["<domain missing>"]
+            .keys.map { $0 } ?? []
         check(residue.isEmpty, "defaults read leaves storage empty", "found \(residue)")
     }
 
     static func clampTests() {
         let store = scratch("clamps")
-        let s = Settings(defaults: store, legacy: nil)
+        let s = Settings(defaults: store)
 
         // Lines per notch: 1...1000, wrong type falls back to the default.
         store.set(0, forKey: Settings.Key.linesPerNotch)
@@ -192,7 +188,7 @@ struct SettingsTests {
     // or a wrong type falls back to the default chord wholesale.
     static func hotkeyTests() {
         let store = scratch("hotkey")
-        let s = Settings(defaults: store, legacy: nil)
+        let s = Settings(defaults: store)
 
         store.set(40, forKey: Settings.Key.hotkeyKeyCode)
         store.set(0x0100, forKey: Settings.Key.hotkeyModifiers)
@@ -227,7 +223,7 @@ struct SettingsTests {
 
     static func resetTests() {
         let store = scratch("reset")
-        let s = Settings(defaults: store, legacy: nil)
+        let s = Settings(defaults: store)
         s.jailEnabled = false
         s.linesPerNotch = 7
         s.targetBundleID = "com.example.game"
@@ -249,7 +245,6 @@ struct SettingsTests {
               "reset: removes keys rather than writing defaults")
         checkEq(store.object(forKey: recoveryKey) as? Int, 196_608,
                 "reset: spares recovery original")
-        check(store.bool(forKey: markerKey), "reset: spares migration marker")
         checkEq(store.string(forKey: "future.unknownKey"), "keep",
                 "reset: leaves unknown keys untouched")
 
@@ -259,54 +254,5 @@ struct SettingsTests {
         s.lastRegisteredVersion = nil
         check(store.object(forKey: Settings.Key.lastRegisteredVersion) == nil,
               "version: nil setter removes the stored key")
-    }
-
-    static func migrationTests() {
-        // First bundled run copies the stored original across domains.
-        let legacy = scratch("legacy-value")
-        legacy.set(196_608, forKey: recoveryKey)
-        let migrated = scratch("migrate-copies")
-        _ = Settings(defaults: migrated, legacy: legacy)
-        checkEq(migrated.object(forKey: recoveryKey) as? Int, 196_608,
-                "migration: copies legacy original")
-        check(migrated.bool(forKey: markerKey), "migration: sets marker")
-
-        // A value already in the destination wins.
-        let occupied = scratch("migrate-occupied")
-        occupied.set(111, forKey: recoveryKey)
-        _ = Settings(defaults: occupied, legacy: legacy)
-        checkEq(occupied.object(forKey: recoveryKey) as? Int, 111,
-                "migration: never overwrites destination")
-
-        // The marker makes it one-time: removing the value later must not
-        // re-import a stale legacy copy.
-        migrated.removeObject(forKey: recoveryKey)
-        _ = Settings(defaults: migrated, legacy: legacy)
-        check(migrated.object(forKey: recoveryKey) == nil,
-              "migration: marker blocks a second import")
-
-        // -1 is the one destructive value and never migrates; junk neither.
-        let legacyDisabled = scratch("legacy-disabled")
-        legacyDisabled.set(-1, forKey: recoveryKey)
-        let refusedDisabled = scratch("migrate-refuses-disabled")
-        _ = Settings(defaults: refusedDisabled, legacy: legacyDisabled)
-        check(refusedDisabled.object(forKey: recoveryKey) == nil,
-              "migration: refuses -1")
-        check(refusedDisabled.bool(forKey: markerKey),
-              "migration: marker set even when refused")
-
-        let legacyJunk = scratch("legacy-junk")
-        legacyJunk.set("junk", forKey: recoveryKey)
-        let refusedJunk = scratch("migrate-refuses-junk")
-        _ = Settings(defaults: refusedJunk, legacy: legacyJunk)
-        check(refusedJunk.object(forKey: recoveryKey) == nil,
-              "migration: refuses non-integer")
-
-        // No legacy domain at all: marker set, nothing copied, no crash.
-        let noLegacy = scratch("migrate-no-legacy")
-        _ = Settings(defaults: noLegacy, legacy: nil)
-        check(noLegacy.object(forKey: recoveryKey) == nil,
-              "migration: nil legacy copies nothing")
-        check(noLegacy.bool(forKey: markerKey), "migration: nil legacy sets marker")
     }
 }

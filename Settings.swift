@@ -67,21 +67,10 @@ final class Settings {
         static let hotkeyModifiers = 0x0100 | 0x0800
     }
 
-    // The unbundled CLI's UserDefaults domain, keyed by process name.
-    static let legacyDomainName = "mousejail"
-    // Must match PointerAccel.storeKey, which owns reads and writes of the
-    // live value; Settings only migrates it across the domain switch.
-    private static let recoveryOriginalKey = "recovery.originalMouseAcceleration"
-    // recovery.-prefixed on purpose: "Reset to defaults" spares it, so a
-    // reset can never re-trigger a stale re-import from the old domain.
-    private static let migrationMarkerKey = "recovery.migratedFromLegacyDomain"
-
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard,
-         legacy: UserDefaults? = UserDefaults(suiteName: Settings.legacyDomainName)) {
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        migrateLegacyRecovery(from: legacy)
     }
 
     // MARK: - Typed reads with default fallback
@@ -251,23 +240,6 @@ final class Settings {
         for key in Key.all {
             defaults.removeObject(forKey: key)
         }
-    }
-
-    // MARK: - Migration
-
-    // One-time read: the unbundled CLI persisted the original acceleration
-    // under its process-name domain (legacyDomainName), and the bundled
-    // app's .standard is a different domain. The first bundled run copies
-    // the value over so crash recovery still knows the real acceleration.
-    // The validity rule mirrors PointerAccel's: an Int32-representable value
-    // that is not -1; junk and the one destructive value never migrate.
-    private func migrateLegacyRecovery(from legacy: UserDefaults?) {
-        guard !defaults.bool(forKey: Self.migrationMarkerKey) else { return }
-        defer { defaults.set(true, forKey: Self.migrationMarkerKey) }
-        guard defaults.object(forKey: Self.recoveryOriginalKey) == nil,
-              let stored = legacy?.object(forKey: Self.recoveryOriginalKey) as? Int,
-              let value = Int32(exactly: stored), value != -1 else { return }
-        defaults.set(stored, forKey: Self.recoveryOriginalKey)
     }
 }
 

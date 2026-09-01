@@ -29,5 +29,5 @@ Left unfixed deliberately; none blocks use. Worth revisiting if the symptom show
 - `legacyWatcherCurrent()` cannot distinguish the two mechanisms (they share one launchd label), so it can report the legacy job current when the hollow SMAppService job is what launchd holds.
 - After the spawn probe installs the fallback, the BTM record can return to enabled while the legacy plist stays on disk, so both registrations exist at once on ordinary launches. Reset now polls this away; nothing else depends on only one being present.
 - `bootOutLegacyWatcher()` returns success without booting out when the plist is missing, so a job loaded under the shared label with no file could block `register()`.
-- `recovery.originalMouseAcceleration` is an independent string literal in both `Settings.swift` and `PointerAccel.swift`, and no test links both.
+- `recovery.originalMouseAcceleration` is a string literal in `PointerAccel.swift` that `Settings.swift` only knows by its `recovery.` prefix (the rule that spares it from reset); no test links the two.
 - `Settings.Key.all` is hand-maintained: a future key omitted from it would be silently skipped by "Reset to defaults".
