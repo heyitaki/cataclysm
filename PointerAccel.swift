@@ -97,6 +97,23 @@ final class PointerAccel {
 
     var isActive: Bool { timer != nil }
 
+    // A released instance (disable() or restore() ran) whose write of the
+    // original failed, so the property still reads -1 with nobody
+    // reasserting it. writeFailing never covers this: exit-path writes are
+    // deliberately unreported, so the owner has to read it here or a panel
+    // reopen would show the feature as restored.
+    var restoreFailed: Bool { holding && timer == nil }
+
+    // IOHIDEventSystemClientCreateSimpleClient can return null in degraded
+    // contexts despite its nonnull annotation, and a null client fails every
+    // call silently. The only reliable probe is whether a property read
+    // round-trips at all; callers gate their "acceleration control is on"
+    // report on this rather than on enable() having been called.
+    var clientResponsive: Bool {
+        if case .unavailable = read() { return false }
+        return true
+    }
+
     // Overwrite the property and hold it there until disable(). Idempotent.
     func enable() {
         dispatchPrecondition(condition: .onQueue(.main))
@@ -125,10 +142,13 @@ final class PointerAccel {
         }
     }
 
-    // Stop holding the property and put the original back.
-    func disable() {
+    // Stop holding the property and put the original back. Returns
+    // restore()'s verdict: false means the property still reads -1 with the
+    // write of the original failed, and the owner must keep this instance for
+    // a later retry rather than drop it.
+    func disable() -> Bool {
         dispatchPrecondition(condition: .onQueue(.main))
-        teardown()
+        return teardown()
     }
 
     // Safe on any exit path: acts only while this instance holds the
@@ -138,8 +158,12 @@ final class PointerAccel {
     // Exit paths must not report health: the process is going away and a
     // callback here would latch a failure no later write can clear, or run
     // against a half-deallocated owner on the deinit path.
-    func restore() {
-        guard holding else { return }
+    // Returns whether the claim is released afterwards; false only when the
+    // property still reads -1 and the write of the original failed, the one
+    // case where the stored original must survive for a later restore.
+    @discardableResult
+    func restore() -> Bool {
+        guard holding else { return true }
         switch read() {
         case .value(Self.disabled), .unavailable:
             if original == nil {
@@ -156,6 +180,7 @@ final class PointerAccel {
         case .value, .unreadable:
             holding = false
         }
+        return !holding
     }
 
     deinit {
@@ -166,14 +191,15 @@ final class PointerAccel {
         teardown()
     }
 
-    private func teardown() {
+    @discardableResult
+    private func teardown() -> Bool {
         timer?.invalidate()
         timer = nil
         if let o = wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(o)
             wakeObserver = nil
         }
-        restore()
+        return restore()
     }
 
     private func reassert() {

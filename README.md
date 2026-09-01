@@ -1,48 +1,46 @@
-# mousejail
+# Cataclysm
 
-Confines the mouse cursor to a game's window on macOS. Built for League of Legends in windowed mode, works for any app.
+Fixes the mouse for League of Legends on macOS.
 
-Games that don't capture the cursor in windowed mode let it slip onto the desktop, so an edge flick mid-fight opens a context menu instead of registering in game. Tools that warp the cursor back after it escapes leave a race where clicks still land outside, and the post-warp suppression makes edges feel sticky. mousejail uses the capture technique VMs use: it disconnects the hardware mouse from the cursor (`CGAssociateMouseAndMouseCursorPosition`) and places the cursor itself on every event from clamped tracking of the raw deltas. The cursor can't cross the window edge even transiently, and movement feels native everywhere else.
+Playing League in a window on a Mac, three things are wrong out of the box: the cursor slips off the game window, so an edge flick mid-fight opens a context menu on the desktop instead of moving the camera; the pointer accelerates, so the same hand motion moves the cursor a different distance depending on how fast you made it; and the scroll wheel zooms the wrong way. Cataclysm fixes all three. It lives in the menu bar, works with sensible defaults the moment you grant it one permission, and everything adjustable is in the dropdown.
 
-## Details
-
-- An active HID-level `CGEventTap` rewrites each mouse event's location and deltas to stay inside the window's content area. The title bar is excluded so click-flicks can't drag the window.
-- The clamp follows the window's rounded corners, so the cursor can't sit in the corner gap outside the window, where a click lands on the app behind and drops the game out of focus.
-- The window frame is re-read twice a second, so moving the window or changing the game's resolution just works.
-- Engages only while the game is frontmost, releases the instant it isn't.
-- Warp displacement folds into the next event's delta on macOS. mousejail compensates, so cursor speed is unchanged (approach borrowed from [mouselock](https://github.com/mxrlkn/mouselock)).
+The cursor fix is the capture technique virtual machines use: the hardware mouse is disconnected from the on-screen cursor and Cataclysm places the cursor itself, clamped to the game window, on every movement. The cursor cannot cross the window edge even for a frame, and it follows the window's rounded corners so a click in the corner gap can't land on the app behind the game. It engages only while the game is frontmost and releases the instant it isn't.
 
 ## Install
 
-Needs the Xcode command line tools and [Hammerspoon](https://www.hammerspoon.org).
+Needs macOS 13 (Ventura) or later; works on both Apple silicon and Intel Macs.
 
-```
-make install
-```
+1. Download `Cataclysm-x.y.z.dmg` from the [releases page](https://github.com/heyitaki/cataclysm/releases) and open it.
+2. Drag `Cataclysm` onto the `Applications` shortcut next to it, then eject the image.
+3. Open Cataclysm from Applications. macOS will refuse the first launch with a malware warning, because the app is not notarized by Apple. That is expected:
+   - Close the warning.
+   - Open System Settings, go to Privacy & Security, and scroll down: you'll see a line saying Cataclysm was blocked, with an **Open Anyway** button. Click it and confirm.
+   - This is needed once. After that it opens like any other app.
+4. Cataclysm asks for the Accessibility permission on first run and walks you through granting it. It needs Accessibility to see mouse events; nothing works until it's granted.
 
-Add `require("mousejail")` to `~/.hammerspoon/init.lua` and reload. Hammerspoon needs the Accessibility permission. `cmd+alt+L` toggles.
+Look for the Cataclysm icon in the menu bar. The dropdown has the on/off switches, the game picker, and a scroll speed slider; the rest is under Advanced.
 
-Later rebuilds want `make restart`, which installs and then reloads Hammerspoon so the running helper is replaced. Copying the binary alone leaves the old one running, so a plain `make install` is tested against the previous build. That target drives Hammerspoon through its `hs` command line tool, which needs `require("hs.ipc")` in `init.lua`; without it, restart the helper by pressing `cmd+alt+L` twice.
+Press ⌥⌘L to toggle the cursor lock at any time, even while the game has focus. You can record a different shortcut under Advanced.
 
-## Another game
+## If the cursor ever freezes
 
-```
-./mousejail com.example.game
-```
+If Cataclysm is force-quit or crashes at exactly the wrong moment, the cursor can be left disconnected from the mouse. A small helper watches for this and reconnects it within about a second; if the helper itself has to be restarted by the system, the worst case is around ten seconds. If the cursor is somehow still stuck after that, log out and back in.
 
-Default is League's game client. With Hammerspoon, set `BUNDLE` in `mousejail.lua`. Find a bundle id with `osascript -e 'id of app "GameName"'`. Anything unrecognized on the command line is an error rather than a bundle id, so a typo can't leave the jail waiting on an app that doesn't exist.
+## A second display
 
-## Corner radius
+The jail confines the cursor to the game window, so while League is frontmost your other display is unreachable. That is the point of the app, but it surprises people the first time. Click out of the game (cmd+tab) and the cursor is free again.
 
-```
-./mousejail --corner-radius 32
-```
+## What it does to your input
 
-The default of 18 points suits Riot's window. A standard macOS 26 window is nearer 32, earlier releases are smaller, and a game in true fullscreen has nothing behind it to escape onto. Too large only costs reachable area in the corners, too small leaves the gap open, so round up. `0` turns corner clamping off. With Hammerspoon, set `RADIUS` in `mousejail.lua`.
+Cataclysm clamps and rewrites your own mouse input: it keeps the cursor inside the window, removes pointer acceleration, and can flip or scale scrolling. It never generates input of its own, no clicks, no movement, no automation. macOS League does not run Vanguard.
 
-## Recovery
+## Uninstall
 
-If an instance dies mid-capture the cursor stays disconnected. The Hammerspoon supervisor restores it automatically. Standalone, run `./mousejail --release`.
+Open the dropdown, expand Advanced, and click "Reset everything and quit". That restores your mouse acceleration, reconnects the cursor, removes the crash-recovery helper and the login item, and clears all settings. Then drag Cataclysm from Applications to the Trash.
+
+## Building from source
+
+Needs the Xcode command line tools. `make` builds `build/Cataclysm.app`; `make test` runs the tests; `make dmg VERSION=x.y.z` produces the installer image. `make release VERSION=x.y.z IDENTITY="Developer ID Application: <name> (<team>)" NOTARY_PROFILE=<profile>` builds, notarizes, and staples the DMG; it needs an Apple Developer ID, and without one releases ship straight from `make dmg`. For tuning, running the bundled binary with `--dump-scroll` logs each raw scroll event and the filter's decision to stdout.
 
 ## License
 
