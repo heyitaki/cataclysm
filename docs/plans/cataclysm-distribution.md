@@ -104,10 +104,10 @@ Traps already paid for, do not rediscover:
 
 ### Task 10: Watcher and registration
 
-- [ ] Read the spec's "Crash recovery and the watcher". `--watch`: no UI, no taps, no property writes, no lock; on startup, if no app with the bundle id is running, re-associate once, then poll every second and re-associate on each present-to-absent transition.
-- [ ] Registration in the app: `SMAppService.agent(plistName:)` after onboarding only; `register()` errors and `.requiresApproval` land in the panel status area; version-change relaunches unregister then re-register; `SMAppService.mainApp` login item stays independent.
-- [ ] Legacy fallback per spec: on `SMAppService` refusal write `~/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` with absolute `ProgramArguments` from `Bundle.main.bundleURL`, `launchctl bootstrap gui/$UID`, rewrite the path when the app notices it moved; "Reset everything and quit" boots out and deletes this file too.
-- [ ] `make app` and `make test` exit 0. Never register from this task; registration runs only inside Task 11's smoke mode.
+- [x] Read the spec's "Crash recovery and the watcher". `--watch`: no UI, no taps, no property writes, no lock; on startup, if no app with the bundle id is running, re-associate once, then poll every second and re-associate on each present-to-absent transition.
+- [x] Registration in the app: `SMAppService.agent(plistName:)` after onboarding only; `register()` errors and `.requiresApproval` land in the panel status area; version-change relaunches unregister then re-register; `SMAppService.mainApp` login item stays independent.
+- [x] Legacy fallback per spec: on `SMAppService` refusal write `~/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` with absolute `ProgramArguments` from `Bundle.main.bundleURL`, `launchctl bootstrap gui/$UID`, rewrite the path when the app notices it moved; "Reset everything and quit" boots out and deletes this file too.
+- [x] `make app` and `make test` exit 0. Never register from this task; registration runs only inside Task 11's smoke mode.
 
 ### Task 11: Acceptance gate, retire the lua
 

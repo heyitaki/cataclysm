@@ -32,11 +32,7 @@ struct CataclysmMain {
     static func main() {
         let args = CommandLine.arguments.dropFirst()
         if args.contains("--watch") {
-            // Task 10 implements the re-association watcher loop. The watcher
-            // takes no instance lock by design: it only ever calls the
-            // idempotent release.
-            print("cataclysm --watch: not implemented yet")
-            exit(0)
+            runWatcher()
         }
         if args.contains("--smoke-register") {
             // Task 11 implements the SMAppService registration smoke gate.
@@ -46,6 +42,31 @@ struct CataclysmMain {
         AppRuntime.shared.preflight()
         AppRuntime.shared.start()
         CataclysmApp.main()
+    }
+
+    // The watcher process (spec "Crash recovery and the watcher"): no UI, no
+    // taps, no property writes, and no instance lock — it only ever calls the
+    // idempotent release, so it can never conflict with a live app instance.
+    // Deliberately tiny: launchd restarts a crashed KeepAlive job at most
+    // about every 10s, so the less here that can crash, the better.
+    static func runWatcher() -> Never {
+        var previous: Bool?
+        let timer = Timer(timeInterval: 1.0, repeats: true) { _ in
+            let present = !NSRunningApplication
+                .runningApplications(withBundleIdentifier: cataclysmBundleID)
+                .isEmpty
+            if watcherShouldRelease(previous: previous, present: present) {
+                CGAssociateMouseAndMouseCursorPosition(1)
+            }
+            previous = present
+        }
+        // Fire once before the loop: the startup release is the case that
+        // matters most (a SIGKILL that took the app and the watcher together
+        // never produces a present-to-absent transition).
+        timer.fire()
+        RunLoop.main.add(timer, forMode: .default)
+        RunLoop.main.run()
+        exit(0) // unreachable; the watcher runs until launchd stops it
     }
 }
 
@@ -67,6 +88,10 @@ final class AppState: ObservableObject {
     @Published var accelUnresponsive = false
     @Published var watcherRegistered = false
     @Published var watcherRequiresApproval = false
+    // register() threw (SMAppService path) and the legacy bootstrap failed
+    // too, or the legacy write itself failed. Lands in the panel's status
+    // area, never in a log nobody reads.
+    @Published var watcherError: String?
     @Published var loginItemError: String?
     // RegisterEventHotKey refused the chord (another app owns it). Shows in
     // the hotkey row rather than leaving a recorded chord that does nothing.
@@ -313,13 +338,117 @@ final class AppRuntime {
         state.accelWriteFailing = pointerAccel.writeFailing
     }
 
-    // Task 10 implements SMAppService watcher registration. The ordering hook
-    // is what Task 6 owns: called only after trust, so no agent is ever
+    // Called only after trust (Task 6 owns the ordering), so no agent is ever
     // registered on a first launch that is still ungranted or quarantined.
-    // The login item half is live already: reconcile the stored preference
-    // once trust lets startup finish.
     private func registerAgentsIfNeeded() {
         syncLoginItem()
+        registerWatcher()
+    }
+
+    // MARK: - Watcher registration
+
+    private var legacyWatcherLabel: String { "\(cataclysmBundleID).watch" }
+
+    private var legacyWatcherPlistURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(legacyWatcherLabel).plist")
+    }
+
+    // The absolute path the legacy plist carries; derived from bundleURL every
+    // read so a moved bundle is noticed, never cached.
+    private var watcherExecutablePath: String {
+        Bundle.main.bundleURL
+            .appendingPathComponent("Contents/MacOS/cataclysm").path
+    }
+
+    private func appVersion() -> String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    }
+
+    // The watcher agent always runs; it is not a user setting. A version
+    // change unregisters first: SMAppService may not launch an agent whose
+    // executable changed unless it is re-registered, and every release
+    // changes the executable.
+    private func registerWatcher() {
+        guard let settings else { return }
+        let agent = SMAppService.agent(plistName: watcherPlistName)
+        let version = appVersion()
+        let versionChanged = needsWatcherReregistration(
+            lastRegistered: settings.lastRegisteredVersion, current: version)
+        if agent.status == .enabled, versionChanged {
+            try? agent.unregister()
+        }
+        if agent.status != .enabled || versionChanged {
+            do {
+                try agent.register()
+                settings.lastRegisteredVersion = version
+                state.watcherError = nil
+                // A legacy job left over from a build SMAppService refused is
+                // now redundant; two watchers are harmless but one shows as a
+                // stray Login Item.
+                bootOutLegacyWatcher()
+            } catch {
+                // SMAppService refused (the self-signed identity, or
+                // anything else): fall back to the mechanism it replaced,
+                // which has no code-signing requirement at all.
+                if let failure = installLegacyWatcher() {
+                    state.watcherError = "Crash recovery failed: "
+                        + "\(error.localizedDescription); \(failure)"
+                } else {
+                    settings.lastRegisteredVersion = version
+                    state.watcherError = nil
+                }
+            }
+        }
+        reconcileLegacyWatcherIfMoved()
+        refreshWatcherStatus()
+    }
+
+    // Writes the legacy plist with the current absolute executable path and
+    // bootstraps it. Boots out first: launchd keeps the loaded definition, so
+    // rewriting the file alone never reaches a job already bootstrapped.
+    // Returns a failure description, or nil on success.
+    private func installLegacyWatcher() -> String? {
+        do {
+            let data = try legacyWatcherPlistData(
+                label: legacyWatcherLabel, bundleID: cataclysmBundleID,
+                executablePath: watcherExecutablePath)
+            try FileManager.default.createDirectory(
+                at: legacyWatcherPlistURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            runLaunchctl(["bootout", "gui/\(getuid())/\(legacyWatcherLabel)"])
+            try data.write(to: legacyWatcherPlistURL)
+            guard runLaunchctl(
+                ["bootstrap", "gui/\(getuid())", legacyWatcherPlistURL.path]) == 0
+            else { return "legacy bootstrap failed" }
+            return nil
+        } catch {
+            return "legacy plist write failed: \(error.localizedDescription)"
+        }
+    }
+
+    // The legacy plist's absolute path goes stale when the app moves (the
+    // ~/Downloads case BundleProgram exists to solve, which the legacy path
+    // cannot use); rewrite and re-bootstrap when it no longer matches.
+    private func reconcileLegacyWatcherIfMoved() {
+        guard let data = try? Data(contentsOf: legacyWatcherPlistURL),
+              let stored = legacyWatcherExecutablePath(inPlistData: data),
+              stored != watcherExecutablePath else { return }
+        if let failure = installLegacyWatcher() {
+            state.watcherError = "Crash recovery failed after the app moved: \(failure)"
+        }
+    }
+
+    @discardableResult
+    private func runLaunchctl(_ arguments: [String]) -> Int32 {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        proc.arguments = arguments
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do { try proc.run() } catch { return -1 }
+        proc.waitUntilExit()
+        return proc.terminationStatus
     }
 
     // Launch at login is SMAppService.mainApp, independent of the watcher
@@ -340,13 +469,19 @@ final class AppRuntime {
         }
     }
 
-    // Read-only status probe for the crash-recovery row; registration itself
-    // is Task 10's. Until it lands, status reads .notRegistered and the row
-    // truthfully says crash recovery is off.
+    // Read-only status probe for the crash-recovery row, re-run on every
+    // panel open. Either mechanism counts as registered: the SMAppService
+    // agent, or the legacy job actually loaded in launchd (the plist file
+    // alone proves nothing if bootstrap failed).
     func refreshWatcherStatus() {
         let status = SMAppService.agent(plistName: watcherPlistName).status
-        state.watcherRegistered = status == .enabled
         state.watcherRequiresApproval = status == .requiresApproval
+        state.watcherRegistered = status == .enabled || legacyWatcherLoaded()
+    }
+
+    private func legacyWatcherLoaded() -> Bool {
+        FileManager.default.fileExists(atPath: legacyWatcherPlistURL.path)
+            && runLaunchctl(["print", "gui/\(getuid())/\(legacyWatcherLabel)"]) == 0
     }
 
     // MARK: - Panel write-through
@@ -525,21 +660,14 @@ final class AppRuntime {
         exit(0)
     }
 
-    // The legacy fallback (Task 10) writes ~/Library/LaunchAgents/<label>.plist
-    // when SMAppService refuses the self-signed identity; "Reset everything"
-    // has to boot it out and delete the file even before that task lands,
-    // since a prior build may have written it.
+    // Boots out and deletes the legacy job. Run by "Reset everything and
+    // quit" and after a successful SMAppService registration that makes a
+    // leftover legacy job redundant.
     private func bootOutLegacyWatcher() {
-        let label = "\(cataclysmBundleID).watch"
-        let plist = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
-        guard FileManager.default.fileExists(atPath: plist.path) else { return }
-        let bootout = Process()
-        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        bootout.arguments = ["bootout", "gui/\(getuid())/\(label)"]
-        try? bootout.run()
-        bootout.waitUntilExit()
-        try? FileManager.default.removeItem(at: plist)
+        guard FileManager.default.fileExists(atPath: legacyWatcherPlistURL.path)
+        else { return }
+        runLaunchctl(["bootout", "gui/\(getuid())/\(legacyWatcherLabel)"])
+        try? FileManager.default.removeItem(at: legacyWatcherPlistURL)
     }
 
     private func applyScrollConfigs() {
@@ -729,6 +857,10 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             if state.trusted && !state.watcherRegistered { watcherRow }
+            if let watcherError = state.watcherError {
+                Text(watcherError).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Divider()
             jailSection
             Divider()
