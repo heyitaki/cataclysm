@@ -9,6 +9,7 @@
 
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 let cataclysmBundleID = "io.github.heyitaki.cataclysm"
 let watcherPlistName = "\(cataclysmBundleID).watch.plist"
@@ -80,6 +81,8 @@ final class SettingsModel: ObservableObject {
     @Published var launchAtLogin = true
     @Published var mulThousandths = 1_000
     @Published var targetName = ""
+    @Published var targetBundleID = ""
+    @Published var pickerRows: [GamePickerRow] = []
 }
 
 // MARK: - Startup sequence and feature lifecycle
@@ -95,6 +98,7 @@ final class AppRuntime {
     private var refreshTimer: Timer?
     private var trustTimer: Timer?
     private var activationObserver: NSObjectProtocol?
+    private var pickerObservers: [NSObjectProtocol] = []
     private var onboarding: OnboardingController?
     private var signalSources: [DispatchSourceSignal] = []
 
@@ -142,6 +146,18 @@ final class AppRuntime {
         trustTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
             [weak self] _ in self?.trustTick()
         }
+        // Keep the game picker fresh for the panel's whole lifetime (spec
+        // "Game picker"): a target quitting while the panel is open drops to
+        // the synthesized stored row with the selection unchanged. These are
+        // NSWorkspace.shared.notificationCenter notifications, not
+        // NotificationCenter.default ones.
+        for name in [NSWorkspace.didLaunchApplicationNotification,
+                     NSWorkspace.didTerminateApplicationNotification] {
+            pickerObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+                forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.rebuildGamePicker()
+            })
+        }
     }
 
     // Reopened from the panel's warning row after a lost grant; never shown
@@ -173,6 +189,23 @@ final class AppRuntime {
         panel.launchAtLogin = settings.launchAtLogin
         panel.mulThousandths = settings.mulThousandths
         panel.targetName = settings.targetDisplayName
+        panel.targetBundleID = settings.targetBundleID
+        rebuildGamePicker()
+    }
+
+    // Snapshot the running .regular apps into pure picker rows. Called on
+    // panel open (via reloadPanel) and on every workspace launch/terminate
+    // notification.
+    func rebuildGamePicker() {
+        guard let settings else { return }
+        let running = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .map { GamePickerCandidate(bundleID: $0.bundleIdentifier,
+                                       name: $0.localizedName) }
+        panel.pickerRows = buildGamePickerRows(
+            storedBundleID: settings.targetBundleID,
+            storedName: settings.targetDisplayName,
+            running: running, ownBundleID: cataclysmBundleID)
     }
 
     private func trustTick() {
@@ -303,6 +336,41 @@ final class AppRuntime {
         panel.jailEnabled = on
         jailEnabled = on
         if state.featuresRunning { refresh() }
+    }
+
+    // Persist the bundle id and the display name together (spec "Game
+    // picker"): the synthesized row needs both when the target is absent.
+    func setTarget(bundleID: String, name: String) {
+        settings?.targetBundleID = bundleID
+        settings?.targetDisplayName = name
+        panel.targetBundleID = bundleID
+        panel.targetName = name
+        gameBundle = bundleID
+        rebuildGamePicker()
+        if state.featuresRunning { refresh() }
+    }
+
+    // "Choose from Applications…": the open panel takes focus and dismisses
+    // the Cataclysm panel, so the completion writes straight through the
+    // settings store (via setTarget) and never assumes the panel survived;
+    // the player reopens it to see the new selection.
+    func chooseTargetFromApplications() {
+        let chooser = NSOpenPanel()
+        chooser.allowedContentTypes = [.applicationBundle]
+        chooser.allowsMultipleSelection = false
+        chooser.canChooseDirectories = false
+        chooser.directoryURL = URL(fileURLWithPath: "/Applications")
+        NSApp.activate(ignoringOtherApps: true)
+        chooser.begin { [weak self] response in
+            guard response == .OK, let url = chooser.url,
+                  let bundle = Bundle(url: url),
+                  let id = bundle.bundleIdentifier else { return }
+            let name = (bundle.localizedInfoDictionary?["CFBundleDisplayName"] as? String)
+                ?? (bundle.infoDictionary?["CFBundleDisplayName"] as? String)
+                ?? (bundle.infoDictionary?["CFBundleName"] as? String)
+                ?? url.deletingPathExtension().lastPathComponent
+            self?.setTarget(bundleID: id, name: name)
+        }
     }
 
     func setAccelerationOff(_ on: Bool) {
@@ -584,14 +652,51 @@ struct PanelView: View {
                           isOn: model.jailEnabled,
                           failed: jailFailed,
                           set: { AppRuntime.shared.setJailEnabled($0) })
-            // Task 8 replaces this with the running-apps picker.
-            HStack {
-                Text("Game")
-                Spacer()
-                Text(model.targetName).foregroundStyle(.secondary)
-            }
-            .padding(.leading, 18)
+            gameRow.padding(.leading, 18)
         }
+    }
+
+    // Sentinel tag for the chooser row; a bundle id can never be empty here
+    // because rows without one are excluded from the list.
+    private let chooseTag = ""
+
+    // Rows tagged by bundle id, never by name, so two apps with the same
+    // display name stay distinguishable. Selecting the chooser row opens the
+    // NSOpenPanel and leaves the stored selection untouched until it returns.
+    private var gameRow: some View {
+        Picker("Game", selection: Binding(
+            get: { model.targetBundleID },
+            set: { tag in
+                if tag == chooseTag {
+                    AppRuntime.shared.chooseTargetFromApplications()
+                } else if let row = model.pickerRows.first(where: { $0.bundleID == tag }) {
+                    AppRuntime.shared.setTarget(bundleID: row.bundleID, name: row.name)
+                }
+            })) {
+            ForEach(model.pickerRows, id: \.bundleID) { row in
+                HStack(spacing: 6) {
+                    Image(nsImage: icon(for: row))
+                        .resizable()
+                        .frame(width: 16, height: 16)
+                    Text(row.label)
+                }
+                .tag(row.bundleID)
+            }
+            Divider()
+            Text("Choose from Applications…").tag(chooseTag)
+        }
+    }
+
+    // Icons resolve at render time: running rows use NSRunningApplication's
+    // icon, the synthesized stored row falls back to the generic app icon.
+    private func icon(for row: GamePickerRow) -> NSImage {
+        if row.isRunning,
+           let app = NSWorkspace.shared.runningApplications
+               .first(where: { $0.bundleIdentifier == row.bundleID }),
+           let appIcon = app.icon {
+            return appIcon
+        }
+        return NSWorkspace.shared.icon(for: .applicationBundle)
     }
 
     private var scrollSection: some View {

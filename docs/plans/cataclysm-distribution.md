@@ -91,10 +91,10 @@ Traps already paid for, do not rediscover:
 
 ### Task 8: Game picker
 
-- [ ] Read the spec's "Game picker". Rows: stored target first (synthesized from persisted bundle id plus display name when not running), then running `.regular` apps deduped by bundle id, sorted case-insensitively by name, 16pt icons, tagged by bundle id, duplicate visible names get the id appended, apps without a bundle id excluded, Cataclysm itself excluded.
-- [ ] Rebuild on panel open and on `NSWorkspace.shared.notificationCenter` launch and terminate notifications; a quitting target drops to the synthesized row with selection unchanged.
-- [ ] Final "Choose from Applications…" row: `NSOpenPanel` restricted to `.app`, reads the chosen bundle's id and name, writes them straight to the settings store without assuming the panel survived.
-- [ ] `make app` and `make test` exit 0.
+- [x] Read the spec's "Game picker". Rows: stored target first (synthesized from persisted bundle id plus display name when not running), then running `.regular` apps deduped by bundle id, sorted case-insensitively by name, 16pt icons, tagged by bundle id, duplicate visible names get the id appended, apps without a bundle id excluded, Cataclysm itself excluded.
+- [x] Rebuild on panel open and on `NSWorkspace.shared.notificationCenter` launch and terminate notifications; a quitting target drops to the synthesized row with selection unchanged.
+- [x] Final "Choose from Applications…" row: `NSOpenPanel` restricted to `.app`, reads the chosen bundle's id and name, writes them straight to the settings store without assuming the panel survived.
+- [x] `make app` and `make test` exit 0.
 
 ### Task 9: Advanced group, hotkey, resets
 

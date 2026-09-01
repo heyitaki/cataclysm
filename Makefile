@@ -13,7 +13,7 @@ APP = build/Cataclysm.app
 
 # Explicit source list: a *.swift glob breaks once a second entry point exists.
 CLI_SOURCES = main.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift
-APP_SOURCES = CataclysmApp.swift Startup.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift
+APP_SOURCES = CataclysmApp.swift Startup.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift
 
 $(BINARY): $(CLI_SOURCES) Bridging.h
 	xcrun swiftc -O -import-objc-header Bridging.h $(CLI_SOURCES) -o $(BINARY)
@@ -93,11 +93,12 @@ restart: install
 	done; \
 	echo "helper did not restart; press cmd+alt+L twice"; exit 1
 
-test: build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests
+test: build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests
 	./build/scrollfilter-tests
 	./build/settings-tests
 	./build/startup-tests
 	./build/panelmath-tests
+	./build/gamepicker-tests
 
 build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
 	mkdir -p build
@@ -115,6 +116,10 @@ build/startup-tests: Startup.swift tests/StartupTests.swift
 build/panelmath-tests: PanelMath.swift tests/PanelMathTests.swift
 	mkdir -p build
 	xcrun swiftc -O PanelMath.swift tests/PanelMathTests.swift -o $@
+
+build/gamepicker-tests: GamePicker.swift tests/GamePickerTests.swift
+	mkdir -p build
+	xcrun swiftc -O GamePicker.swift tests/GamePickerTests.swift -o $@
 
 clean:
 	rm -f $(BINARY)
