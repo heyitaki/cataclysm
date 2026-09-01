@@ -110,7 +110,37 @@ build/smoke-tests: Smoke.swift tests/SmokeTests.swift
 	mkdir -p build
 	xcrun swiftc -O Smoke.swift tests/SmokeTests.swift -o $@
 
+DMG = build/Cataclysm-$(VERSION).dmg
+
+# Drag-to-install image: app plus an /Applications symlink, Finder default
+# layout (the arrow-and-background presentation would need create-dmg; the
+# plain hdiutil image is the spec's always-available fallback). Signed with
+# whatever IDENTITY is configured; never notarized.
+dmg: app
+	rm -rf build/dmg-stage $(DMG)
+	mkdir -p build/dmg-stage
+	cp -R $(APP) build/dmg-stage/
+	ln -s /Applications build/dmg-stage/Applications
+	hdiutil create -volname Cataclysm -srcfolder build/dmg-stage -ov -format UDZO $(DMG)
+	codesign -f -s $(IDENTITY) $(DMG)
+	codesign --verify $(DMG)
+
+# Notarized release. Refuses up front, before building anything, when the
+# Developer ID identity or the notary keychain profile is missing, so an
+# unnotarized DMG never ships under a name that promises otherwise. The
+# stapler step doubles as the check that notarization happened: it fails
+# with Error 65 without a ticket.
+release:
+	@case "$(IDENTITY)" in \
+	"Developer ID Application"*) ;; \
+	*) echo 'make release: IDENTITY is "$(IDENTITY)", but notarization needs a "Developer ID Application: ..." identity. Pass IDENTITY="Developer ID Application: <name> (<team>)" or use `make dmg` for a local-identity image.'; exit 1;; \
+	esac
+	@test -n "$(NOTARY_PROFILE)" || { echo 'make release: NOTARY_PROFILE is unset. Store credentials once with `xcrun notarytool store-credentials <profile>` and pass NOTARY_PROFILE=<profile>.'; exit 1; }
+	$(MAKE) dmg VERSION=$(VERSION) IDENTITY="$(IDENTITY)"
+	xcrun notarytool submit $(DMG) --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun stapler staple $(DMG)
+
 clean:
 	rm -rf build
 
-.PHONY: all app test clean
+.PHONY: all app test clean dmg release

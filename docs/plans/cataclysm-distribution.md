@@ -122,10 +122,10 @@ Traps already paid for, do not rediscover:
 
 ### Task 13: DMG, release split, README
 
-- [ ] `make dmg VERSION=x.y.z`: staging folder with `Cataclysm.app` and an `/Applications` symlink, `hdiutil create -volname Cataclysm -srcfolder <stage> -ov -format UDZO`, DMG signed with `IDENTITY`. Verify the image mounts, contains both entries, and detaches cleanly.
-- [ ] `make release VERSION=x.y.z`: runs dmg then notarizes and staples; refuses immediately with a message naming the missing `IDENTITY` (Developer ID) or `NOTARY_PROFILE`. Verify only the refusal path (no profile exists on this machine).
-- [ ] Rewrite `README.md` for friends per the spec: opens with what the app fixes, install steps with the Open Anyway walkthrough, the frozen-cursor recovery note (~1s, ~10s worst case), the second-display surprise, what it does and does not do to input, uninstall via Reset everything and quit.
-- [ ] `make`, `make app`, `make test` exit 0.
+- [x] `make dmg VERSION=x.y.z`: staging folder with `Cataclysm.app` and an `/Applications` symlink, `hdiutil create -volname Cataclysm -srcfolder <stage> -ov -format UDZO`, DMG signed with `IDENTITY`. Verify the image mounts, contains both entries, and detaches cleanly. (Verified: `build/Cataclysm-0.1.0.dmg` mounted with both entries and detached clean.)
+- [x] `make release VERSION=x.y.z`: runs dmg then notarizes and staples; refuses immediately with a message naming the missing `IDENTITY` (Developer ID) or `NOTARY_PROFILE`. Verify only the refusal path (no profile exists on this machine). (Verified both refusals: non-Developer-ID `IDENTITY`, and Developer ID `IDENTITY` with unset `NOTARY_PROFILE`; each exits nonzero before building anything.)
+- [x] Rewrite `README.md` for friends per the spec: opens with what the app fixes, install steps with the Open Anyway walkthrough, the frozen-cursor recovery note (~1s, ~10s worst case), the second-display surprise, what it does and does not do to input, uninstall via Reset everything and quit.
+- [x] `make`, `make app`, `make test` exit 0.
 
 ### Task 14: Verify acceptance criteria
 
