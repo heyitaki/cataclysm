@@ -117,8 +117,8 @@ Traps already paid for, do not rediscover:
 
 ### Task 12: Universal binary
 
-- [ ] `make app` builds both `-target arm64-apple-macos13.0` and `-target x86_64-apple-macos13.0` slices with the bridging header and joins them with `lipo -create` per the spec's recipe.
-- [ ] `lipo -info` on the bundled executable shows both architectures; `otool -l` shows `minos 13.0` on each slice; `codesign --verify --strict` still exits 0; `make test` exits 0.
+- [x] `make app` builds both `-target arm64-apple-macos13.0` and `-target x86_64-apple-macos13.0` slices with the bridging header and joins them with `lipo -create` per the spec's recipe.
+- [x] `lipo -info` on the bundled executable shows both architectures; `otool -l` shows `minos 13.0` on each slice; `codesign --verify --strict` still exits 0; `make test` exits 0.
 
 ### Task 13: DMG, release split, README
 

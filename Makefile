@@ -13,9 +13,18 @@ APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGa
 # Bare `make` builds the app; the mousejail CLI retired with Task 11.
 all: app
 
-build/cataclysm: $(APP_SOURCES) Bridging.h
+# Universal binary: build each slice against the macOS 13 floor (the -target
+# triple enforces the floor; the plist only declares it), then lipo them.
+build/cataclysm-arm64: $(APP_SOURCES) Bridging.h
 	mkdir -p build
-	xcrun swiftc -O -import-objc-header Bridging.h $(APP_SOURCES) -o $@
+	xcrun swiftc -O -target arm64-apple-macos13.0 -import-objc-header Bridging.h $(APP_SOURCES) -o $@
+
+build/cataclysm-x86_64: $(APP_SOURCES) Bridging.h
+	mkdir -p build
+	xcrun swiftc -O -target x86_64-apple-macos13.0 -import-objc-header Bridging.h $(APP_SOURCES) -o $@
+
+build/cataclysm: build/cataclysm-arm64 build/cataclysm-x86_64
+	lipo -create build/cataclysm-arm64 build/cataclysm-x86_64 -output $@
 
 # Bundle assembly is cheap, so `app` rebuilds it every run rather than trusting
 # a directory mtime. Signing identity is self-signed; CSSMERR_TP_NOT_TRUSTED
