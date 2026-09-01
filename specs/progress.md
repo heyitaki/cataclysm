@@ -13,7 +13,7 @@ Everything below needs the user present; none of it is unattended-automatable.
 | r.5 | Hardware scroll measurement with `--dump-scroll` (wheel vs trackpad discriminator), then the manual per-app scroll matrix | The alternate trackpad detection setting ships off pending this |
 | r.6 | GUI checks: which hotkey recorder mechanism works in the panel; whether `AXIsProcessTrusted()` updates without relaunch (decides removing onboarding's Relaunch button) | |
 | r.7 | Remove two denied TCC rows for `com.example.assocprobe.never-granted` in System Settings (Accessibility, Input Monitoring); remove any stray Cataclysm row in Login Items left by an interrupted gate run | `tccutil` cannot delete rows |
-| r.8 | Rename the GitHub repo `mousejail` to `cataclysm` | Old URL redirects |
+| r.8 | Rename the GitHub repo `mousejail` to `cataclysm` | Done 2026-09-01: `heyitaki/cataclysm`, old URL redirects, origin updated. Local checkout still lives at `~/code/mousejail` because Orca registers it by path; re-add it in Orca after moving |
 | r.9 | Icon artwork to replace the generated placeholder | |
 | r.10 | Developer ID membership decision: buy and notarize (`make release`, then the offline second-Mac install test), or ship `make dmg` with the README's Open Anyway walkthrough | This is all the $99 buys |
 | r.11 | Floor and hardware passes: macOS 13 (panel rendering, deep links, agent registration, login item), Intel or Rosetta launch, grant-in-Applications-then-run-from-Downloads | |
