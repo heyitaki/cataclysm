@@ -481,7 +481,6 @@ final class AppRuntime {
                 try agent.register()
                 settings.lastRegisteredVersion = version
                 state.watcherError = nil
-                verifyWatcherSpawn(generation: watcherProbeGeneration)
             } catch {
                 // register() also throws while the agent sits in Login
                 // Items awaiting approval or switched off there. That is
@@ -505,6 +504,18 @@ final class AppRuntime {
         }
         reconcileLegacyWatcherIfMoved()
         refreshWatcherStatus()
+        // Probed whenever the agent is what launchd should be running, not
+        // only on the launch that registered it. A hollow registration
+        // (accepted, .enabled, never spawned) is the normal outcome under the
+        // self-signed identity, and its 10s check only completes if this
+        // process survives that long: quit, logout, or a crash inside the
+        // window would otherwise leave every later launch reading "same
+        // version, enabled" and never installing the fallback. A re-run
+        // inside the window (a trust flap) bumps the generation and drops the
+        // earlier probe's result, so it needs this replacement probe too.
+        if agent.status == .enabled {
+            verifyWatcherSpawn(generation: watcherProbeGeneration)
+        }
     }
 
     // SMAppService can accept a registration launchd then never runs: under
@@ -599,7 +610,10 @@ final class AppRuntime {
     // status area, never in a log. An item switched off in Login Items
     // reads .requiresApproval and register() throws there (same as the
     // watcher agent): that is the user's decision, so it is never
-    // re-requested and shows as an approval hint, not a failure.
+    // re-requested and shows as an approval hint, not a failure. Turning the
+    // preference off unregisters in that state too, else the entry would
+    // outlive the setting and launch the app again once re-enabled there
+    // (resetEverythingAndQuit counts the same pair of states as registered).
     private func syncLoginItem() {
         guard let settings else { return }
         let status = SMAppService.mainApp.status
@@ -608,7 +622,8 @@ final class AppRuntime {
         do {
             if settings.launchAtLogin, status != .enabled, status != .requiresApproval {
                 try SMAppService.mainApp.register()
-            } else if !settings.launchAtLogin, status == .enabled {
+            } else if !settings.launchAtLogin,
+                      status == .enabled || status == .requiresApproval {
                 try SMAppService.mainApp.unregister()
             }
             state.loginItemError = nil
@@ -1234,12 +1249,16 @@ struct PanelView: View {
     // Unavailable while ungranted only until the property is actually taken:
     // step 6 defers the first write to trust, so a checked toggle before then
     // would claim a curve that is still accelerating. Once held, a lost grant
-    // does not release the property, so the toggle stays live.
+    // does not release the property, so the toggle stays live. `held` is
+    // accelHeld rather than the stored value: after a failed restore the
+    // setting reads off while the property is still -1, and a click here is
+    // the only retry of that restore the panel offers.
     private var accelToggle: some View {
         featureToggle("Mouse acceleration off",
                       isOn: model.accelOff,
                       failed: accelFailed,
                       unavailable: !state.trusted && !state.accelHeld,
+                      held: state.accelHeld,
                       set: { AppRuntime.shared.setAccelerationOff($0) })
     }
 
@@ -1247,20 +1266,22 @@ struct PanelView: View {
     // unchecked and disabled, failed reads unchecked with a red caption
     // rather than checked, and only a healthy feature shows its stored value.
     // A failed toggle reads unchecked, so a click would arrive as `true`
-    // whatever is stored: with the feature stored on, that click means
-    // "turn it off" and is routed as false; with it stored off there is
-    // nothing to turn off and the control is disabled, so a click cannot
-    // silently persist a preference the checkbox never shows.
+    // whatever is stored: while the feature still has an effect to undo
+    // (`held`, the stored value unless the caller knows better), that click
+    // means "turn it off" and is routed as false; with nothing to turn off
+    // the control is disabled, so a click cannot silently persist a
+    // preference the checkbox never shows.
     private func featureToggle(_ title: String, isOn: Bool, failed: Bool,
-                               unavailable: Bool? = nil,
+                               unavailable: Bool? = nil, held: Bool? = nil,
                                set: @escaping (Bool) -> Void) -> some View {
         let unavailable = unavailable ?? !state.trusted
+        let held = held ?? isOn
         return HStack {
             Toggle(title, isOn: Binding(
                 get: { isOn && !unavailable && !failed },
                 set: { value in set(failed ? false : value) }))
                 .toggleStyle(.checkbox)
-                .disabled(unavailable || (failed && !isOn))
+                .disabled(unavailable || (failed && !held))
             if failed {
                 Spacer()
                 Text("failed").font(.caption).foregroundStyle(.red)
