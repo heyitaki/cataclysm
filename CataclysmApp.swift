@@ -106,6 +106,9 @@ final class AppState: ObservableObject {
     // area, never in a log nobody reads.
     @Published var watcherError: String?
     @Published var loginItemError: String?
+    // The login item was switched off in Login Items while the preference
+    // is on. Shown as an approval hint, never as a failure.
+    @Published var loginItemRequiresApproval = false
     // "Reset everything and quit" found state it could not tear down and
     // erased nothing; names what is still in place.
     @Published var resetError: String?
@@ -518,12 +521,17 @@ final class AppRuntime {
 
     // Launch at login is SMAppService.mainApp, independent of the watcher
     // agent. register()/unregister() throw; the failure lands in the panel's
-    // status area, never in a log.
+    // status area, never in a log. An item switched off in Login Items
+    // reads .requiresApproval and register() throws there (same as the
+    // watcher agent): that is the user's decision, so it is never
+    // re-requested and shows as an approval hint, not a failure.
     private func syncLoginItem() {
         guard let settings else { return }
+        let status = SMAppService.mainApp.status
+        state.loginItemRequiresApproval =
+            settings.launchAtLogin && status == .requiresApproval
         do {
-            let status = SMAppService.mainApp.status
-            if settings.launchAtLogin, status != .enabled {
+            if settings.launchAtLogin, status != .enabled, status != .requiresApproval {
                 try SMAppService.mainApp.register()
             } else if !settings.launchAtLogin, status == .enabled {
                 try SMAppService.mainApp.unregister()
@@ -1049,11 +1057,15 @@ struct PanelView: View {
                   systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(.orange)
             Spacer()
-            Button("Login Items…") {
-                let link = "x-apple.systempreferences:"
-                    + "com.apple.LoginItems-Settings.extension"
-                if let url = URL(string: link) { NSWorkspace.shared.open(url) }
-            }
+            loginItemsButton
+        }
+    }
+
+    private var loginItemsButton: some View {
+        Button("Login Items…") {
+            let link = "x-apple.systempreferences:"
+                + "com.apple.LoginItems-Settings.extension"
+            if let url = URL(string: link) { NSWorkspace.shared.open(url) }
         }
     }
 
@@ -1264,6 +1276,15 @@ struct PanelView: View {
             if let error = state.loginItemError {
                 Text(error).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if state.loginItemRequiresApproval {
+                HStack {
+                    Label("Launch at login needs approval",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                    Spacer()
+                    loginItemsButton
+                }
             }
             Button("Quit") { AppRuntime.shared.quit() }
         }
