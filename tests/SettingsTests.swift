@@ -2,7 +2,7 @@
 // bound, wrong-type fallback, reset-to-defaults sparing recovery. keys, and
 // the one-time legacy-domain migration. Every store points at a scratch
 // UserDefaults(suiteName:), never .standard, so runs are hermetic and the
-// real mousejail domain is never touched.
+// real legacy CLI domain is never touched.
 //
 // Build and run: make test
 
@@ -24,7 +24,7 @@ func checkEq<T: Equatable>(_ got: T, _ want: T, _ name: String) {
 }
 
 let recoveryKey = "recovery.originalMouseAcceleration"
-let markerKey = "recovery.migratedFromMousejail"
+let markerKey = "recovery.migratedFromLegacyDomain"
 
 var scratchSuites: [String] = []
 

@@ -10,7 +10,7 @@ APP = build/Cataclysm.app
 # Explicit source list; a *.swift glob would silently pick up any stray file.
 APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift
 
-# Bare `make` builds the app; the mousejail CLI retired with Task 11.
+# Bare `make` builds the app; the standalone CLI is retired.
 all: app
 
 # Universal binary: build each slice against the macOS 13 floor (the -target

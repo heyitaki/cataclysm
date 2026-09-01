@@ -1076,9 +1076,9 @@ struct PanelView: View {
                     .help("Radius of the jail's rounded corners; 0 disables corner clamping")
                 Divider()
                 Button("Check for updates…") {
-                    // The repo renames to cataclysm post-release; GitHub
-                    // redirects the old URL, so this link survives it.
-                    let releases = "https://github.com/heyitaki/mousejail/releases"
+                    // Canonical post-rename URL; the repo rename is a
+                    // release-checklist item that makes it live.
+                    let releases = "https://github.com/heyitaki/cataclysm/releases"
                     if let url = URL(string: releases) { NSWorkspace.shared.open(url) }
                 }
                 Button("Reset to defaults") {

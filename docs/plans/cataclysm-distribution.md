@@ -129,11 +129,11 @@ Traps already paid for, do not rediscover:
 
 ### Task 14: Verify acceptance criteria
 
-- [ ] From a clean `make clean`: `make`, `make app`, `make test` all exit 0; `codesign --verify --strict` passes; `lipo -info` shows both slices.
-- [ ] `./build/Cataclysm.app/Contents/MacOS/cataclysm --smoke-register` exits 0 again post-rename and leaves no registered agent, no legacy plist, and no lock file behind (check `launchctl print` reports the label gone and `~/Library/LaunchAgents` has no cataclysm plist).
-- [ ] `make release` without a notary profile refuses with the naming message; `make dmg VERSION=0.1.0` produces a mountable image.
-- [ ] No references to `mousejail` remain outside `specs/`, `docs/plans/`, and git history: `grep -ri mousejail --exclude-dir=specs --exclude-dir=docs --exclude-dir=.git --exclude-dir=build .` returns nothing.
-- [ ] `git status` clean, every prior task's validation commands green.
+- [x] From a clean `make clean`: `make`, `make app`, `make test` all exit 0; `codesign --verify --strict` passes; `lipo -info` shows both slices. (223 checks, 0 failed; both slices `minos 13.0`.)
+- [x] `./build/Cataclysm.app/Contents/MacOS/cataclysm --smoke-register` exits 0 again post-rename and leaves no registered agent, no legacy plist, and no lock file behind (check `launchctl print` reports the label gone and `~/Library/LaunchAgents` has no cataclysm plist). (Passed via the legacy path, same as Task 11: `SMAppService` registered and read `.enabled` but launchd never resolved the executable, so the gate fell through to legacy bootstrap, which passed every step. Label gone, no plist, Application Support dir empty afterward.)
+- [x] `make release` without a notary profile refuses with the naming message; `make dmg VERSION=0.1.0` produces a mountable image. (Refusal names `IDENTITY`; DMG mounted with both entries and detached clean.)
+- [x] No references to `mousejail` remain outside `specs/`, `docs/plans/`, and git history: `grep -ri mousejail --exclude-dir=specs --exclude-dir=docs --exclude-dir=.git --exclude-dir=build .` returns nothing. (Cleaned .gitignore, Makefile comment, releases URL (now `heyitaki/cataclysm`), Settings/tests comments, and renamed the migration marker key. Two deliberate hits remain: `Settings.legacyDomainName = "mousejail"`, which the Context migration rule requires verbatim to read the old CLI's defaults domain, and the worktree's `.git` pointer file, which is git plumbing that `--exclude-dir=.git` covers in a normal checkout.)
+- [x] `git status` clean, every prior task's validation commands green.
 
 ## Post-Completion
 

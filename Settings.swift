@@ -50,7 +50,8 @@ final class Settings {
         static let cornerRadius = 18.0
         static let linesPerNotch = 1
         static let mulThousandths = 1_000
-        // cmd+alt+L, the chord mousejail.lua ships today. Raw Carbon values
+        // cmd+alt+L, the chord the retired Hammerspoon helper shipped. Raw
+        // Carbon values
         // (kVK_ANSI_L, cmdKey | optionKey) so this file needs no Carbon
         // import; the hotkey code that consumes them does.
         static let hotkeyKeyCode = 37
@@ -64,7 +65,7 @@ final class Settings {
     private static let recoveryOriginalKey = "recovery.originalMouseAcceleration"
     // recovery.-prefixed on purpose: "Reset to defaults" spares it, so a
     // reset can never re-trigger a stale re-import from the old domain.
-    private static let migrationMarkerKey = "recovery.migratedFromMousejail"
+    private static let migrationMarkerKey = "recovery.migratedFromLegacyDomain"
 
     private let defaults: UserDefaults
 
@@ -218,7 +219,7 @@ final class Settings {
     // MARK: - Migration
 
     // One-time read: the unbundled CLI persisted the original acceleration
-    // under the process-name domain ("mousejail" plist), and the bundled
+    // under its process-name domain (legacyDomainName), and the bundled
     // app's .standard is a different domain. The first bundled run copies
     // the value over so crash recovery still knows the real acceleration.
     // The validity rule mirrors PointerAccel's: an Int32-representable value
