@@ -299,7 +299,9 @@ final class AppRuntime {
         }
         state.jailTapUp = startTap()
         state.scrollTapUp = startScrollTap()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
+            [weak self] _ in
+            self?.retryDownTaps()
             refresh()
             reviveScrollTap()
         }
@@ -308,6 +310,16 @@ final class AppRuntime {
             object: nil, queue: .main) { _ in refresh() }
         refresh()
         state.featuresRunning = true
+    }
+
+    // tapCreate can refuse while AXIsProcessTrusted() is already true (the
+    // login-item launch race, TCC lagging a fresh grant). trustTick only acts
+    // on a trust change, so without this the feature would stay down with a
+    // "failed" caption until relaunch. Assign only on success so the panel
+    // does not re-render every tick.
+    private func retryDownTaps() {
+        if !state.jailTapUp, startTap() { state.jailTapUp = true }
+        if !state.scrollTapUp, startScrollTap() { state.scrollTapUp = true }
     }
 
     private func stopFeatures() {
@@ -575,9 +587,12 @@ final class AppRuntime {
         chooser.directoryURL = URL(fileURLWithPath: "/Applications")
         NSApp.activate(ignoringOtherApps: true)
         chooser.begin { [weak self] response in
+            // Same self-exclusion as the running-app rows: targeting
+            // Cataclysm would jail the cursor to its own panel.
             guard response == .OK, let url = chooser.url,
                   let bundle = Bundle(url: url),
-                  let id = bundle.bundleIdentifier else { return }
+                  let id = bundle.bundleIdentifier,
+                  id != cataclysmBundleID else { return }
             let name = (bundle.localizedInfoDictionary?["CFBundleDisplayName"] as? String)
                 ?? (bundle.infoDictionary?["CFBundleDisplayName"] as? String)
                 ?? (bundle.infoDictionary?["CFBundleName"] as? String)
@@ -846,6 +861,7 @@ final class AppRuntime {
             .runningApplications(withBundleIdentifier: cataclysmBundleID)
             .first { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         _ = NSApplication.shared
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "\(other?.localizedName ?? "Cataclysm") is already running"
         alert.informativeText =
@@ -856,6 +872,7 @@ final class AppRuntime {
 
     private func showMoveToApplicationsScreen() {
         _ = NSApplication.shared
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Move Cataclysm to the Applications folder first"
         alert.informativeText =
@@ -947,7 +964,7 @@ struct CataclysmApp: App {
     var body: some Scene {
         // `.window` style is a spec requirement: the scroll slider does not
         // render in `.menu`.
-        MenuBarExtra("Cataclysm") {
+        MenuBarExtra("Cataclysm", systemImage: "cursorarrow.rays") {
             PanelView(state: AppRuntime.shared.state, model: AppRuntime.shared.panel)
         }
         .menuBarExtraStyle(.window)
@@ -1119,6 +1136,11 @@ struct PanelView: View {
     // One rendering rule for every feature toggle: unavailable reads
     // unchecked and disabled, failed reads unchecked with a red caption
     // rather than checked, and only a healthy feature shows its stored value.
+    // A failed toggle reads unchecked, so a click would arrive as `true`
+    // whatever is stored: with the feature stored on, that click means
+    // "turn it off" and is routed as false; with it stored off there is
+    // nothing to turn off and the control is disabled, so a click cannot
+    // silently persist a preference the checkbox never shows.
     private func featureToggle(_ title: String, isOn: Bool, failed: Bool,
                                unavailable: Bool? = nil,
                                set: @escaping (Bool) -> Void) -> some View {
@@ -1126,9 +1148,9 @@ struct PanelView: View {
         return HStack {
             Toggle(title, isOn: Binding(
                 get: { isOn && !unavailable && !failed },
-                set: set))
+                set: { value in set(failed ? false : value) }))
                 .toggleStyle(.checkbox)
-                .disabled(unavailable)
+                .disabled(unavailable || (failed && !isOn))
             if failed {
                 Spacer()
                 Text("failed").font(.caption).foregroundStyle(.red)
