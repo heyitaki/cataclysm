@@ -19,6 +19,10 @@ let contentRatios: [CGFloat] = [9.0 / 16.0, 10.0 / 16.0, 3.0 / 4.0, 4.0 / 5.0]
 var clampArea: Clamp?
 var virtualPos = CGPoint.zero
 var engaged = false
+// Runtime gate for the whole jail feature: the app's panel toggle (and later
+// its hotkey) flips it and calls refresh(). The CLI never changes it, so CLI
+// behavior is unchanged.
+var jailEnabled = true
 // A warp folds its displacement into the next mouse event's delta. Track it
 // so integration sees only hand movement, otherwise our own warps feed back
 // and the cursor rockets away.
@@ -147,7 +151,8 @@ func setEngaged(_ on: Bool) {
 }
 
 func refresh() {
-    guard let front = NSWorkspace.shared.frontmostApplication,
+    guard jailEnabled,
+          let front = NSWorkspace.shared.frontmostApplication,
           front.bundleIdentifier == gameBundle else {
         clampArea = nil
         setEngaged(false)

@@ -7,9 +7,11 @@
 // registration. Steps 1-3 run before any UI, so a duplicate launch or a
 // launch from the DMG never flashes a panel.
 
+import ServiceManagement
 import SwiftUI
 
 let cataclysmBundleID = "io.github.heyitaki.cataclysm"
+let watcherPlistName = "\(cataclysmBundleID).watch.plist"
 
 // MARK: - Runtime globals shared with Jail/TapHost
 
@@ -48,13 +50,36 @@ struct CataclysmMain {
 
 // MARK: - Observable status for the panel
 
-// Published state the panel reads. Task 7 builds the real status rows; Task 6
-// owns trusted/featuresRunning and the tap-creation results they need.
+// Published state behind the panel's status and failure rows (spec "Status
+// and failures"). Every failure the app can have surfaces here, because the
+// panel is the app's only surface.
 final class AppState: ObservableObject {
     @Published var trusted = false
     @Published var featuresRunning = false
     @Published var jailTapUp = false
     @Published var scrollTapUp = false
+    // A false return from the HID property write feels identical to the curve
+    // merely being different, so the toggle must show failed, not checked.
+    @Published var accelWriteFailing = false
+    // The HID client never round-tripped a read: nothing is actually held,
+    // so the feature must not present as on.
+    @Published var accelUnresponsive = false
+    @Published var watcherRegistered = false
+    @Published var watcherRequiresApproval = false
+    @Published var loginItemError: String?
+}
+
+// Mirror of the stored settings the panel binds to. AppRuntime is the only
+// writer: its setters persist through Settings, update the live feature, and
+// keep this mirror in sync, so a control can never show a value that did not
+// reach storage.
+final class SettingsModel: ObservableObject {
+    @Published var jailEnabled = true
+    @Published var accelOff = true
+    @Published var invertVertical = true
+    @Published var launchAtLogin = true
+    @Published var mulThousandths = 1_000
+    @Published var targetName = ""
 }
 
 // MARK: - Startup sequence and feature lifecycle
@@ -62,6 +87,7 @@ final class AppState: ObservableObject {
 final class AppRuntime {
     static let shared = AppRuntime()
     let state = AppState()
+    let panel = SettingsModel()
 
     private let lock: InstanceLock
     private var settings: Settings?
@@ -129,9 +155,24 @@ final class AppRuntime {
     private func applySettings(_ s: Settings) {
         gameBundle = s.targetBundleID
         cornerRadius = CGFloat(s.cornerRadius)
+        jailEnabled = s.jailEnabled
         scrollVerticalConfig = s.verticalScrollConfig
         scrollHorizontalConfig = s.horizontalScrollConfig
         scrollAltDetection = s.altTrackpadDetection
+        reloadPanel()
+    }
+
+    // Refresh the panel's mirror from storage; called at startup and every
+    // panel open, so a value changed behind the panel (a later hotkey, a
+    // reset) is never shown stale.
+    func reloadPanel() {
+        guard let settings else { return }
+        panel.jailEnabled = settings.jailEnabled
+        panel.accelOff = settings.accelerationOff
+        panel.invertVertical = settings.invertVertical
+        panel.launchAtLogin = settings.launchAtLogin
+        panel.mulThousandths = settings.mulThousandths
+        panel.targetName = settings.targetDisplayName
     }
 
     private func trustTick() {
@@ -154,10 +195,8 @@ final class AppRuntime {
 
     private func startFeatures() {
         guard !state.featuresRunning else { return }
-        if let settings, settings.accelerationOff, pointerAccel == nil {
-            let accel = PointerAccel()
-            accel.enable()
-            pointerAccel = accel
+        if let settings, settings.accelerationOff {
+            startAcceleration()
         }
         state.jailTapUp = startTap()
         state.scrollTapUp = startScrollTap()
@@ -191,10 +230,129 @@ final class AppRuntime {
         state.featuresRunning = false
     }
 
-    // Task 10 implements SMAppService registration. The ordering hook is what
-    // this task owns: called only after trust, so the agent is never
+    private func startAcceleration() {
+        guard pointerAccel == nil else { return }
+        let accel = PointerAccel()
+        accel.onWriteHealthChange = { [weak self] healthy in
+            self?.state.accelWriteFailing = !healthy
+            // A healthy write proves the client round-trips too.
+            if healthy { self?.state.accelUnresponsive = false }
+        }
+        accel.enable()
+        // Only a read that round-trips proves the HID client is real; until
+        // it does the panel shows the feature as failed rather than on
+        // (enable()'s timer keeps retrying).
+        state.accelUnresponsive = !accel.clientResponsive
+        pointerAccel = accel
+    }
+
+    // Re-probe on panel open: a HID client that recovers without ever passing
+    // through a failing write never fires onWriteHealthChange, so the latched
+    // unresponsive flag has to be re-read when someone looks.
+    func refreshAccelHealth() {
+        guard let pointerAccel else { return }
+        state.accelUnresponsive = !pointerAccel.clientResponsive
+        state.accelWriteFailing = pointerAccel.writeFailing
+    }
+
+    // Task 10 implements SMAppService watcher registration. The ordering hook
+    // is what Task 6 owns: called only after trust, so no agent is ever
     // registered on a first launch that is still ungranted or quarantined.
+    // The login item half is live already: reconcile the stored preference
+    // once trust lets startup finish.
     private func registerAgentsIfNeeded() {
+        syncLoginItem()
+    }
+
+    // Launch at login is SMAppService.mainApp, independent of the watcher
+    // agent. register()/unregister() throw; the failure lands in the panel's
+    // status area, never in a log.
+    private func syncLoginItem() {
+        guard let settings else { return }
+        do {
+            let status = SMAppService.mainApp.status
+            if settings.launchAtLogin, status != .enabled {
+                try SMAppService.mainApp.register()
+            } else if !settings.launchAtLogin, status == .enabled {
+                try SMAppService.mainApp.unregister()
+            }
+            state.loginItemError = nil
+        } catch {
+            state.loginItemError = "Launch at login failed: \(error.localizedDescription)"
+        }
+    }
+
+    // Read-only status probe for the crash-recovery row; registration itself
+    // is Task 10's. Until it lands, status reads .notRegistered and the row
+    // truthfully says crash recovery is off.
+    func refreshWatcherStatus() {
+        let status = SMAppService.agent(plistName: watcherPlistName).status
+        state.watcherRegistered = status == .enabled
+        state.watcherRequiresApproval = status == .requiresApproval
+    }
+
+    // MARK: - Panel write-through
+
+    // Every control writes through the settings store and applies
+    // immediately (spec "The dropdown"). Setters are safe to call while
+    // ungranted: they persist the preference, and the live half applies when
+    // startFeatures() runs.
+
+    func setJailEnabled(_ on: Bool) {
+        settings?.jailEnabled = on
+        panel.jailEnabled = on
+        jailEnabled = on
+        if state.featuresRunning { refresh() }
+    }
+
+    func setAccelerationOff(_ on: Bool) {
+        settings?.accelerationOff = on
+        panel.accelOff = on
+        guard state.featuresRunning else { return }
+        if on {
+            startAcceleration()
+        } else {
+            // disable() restores the original and stops the reassert timer.
+            pointerAccel?.disable()
+            pointerAccel = nil
+            state.accelWriteFailing = false
+            state.accelUnresponsive = false
+        }
+    }
+
+    func setInvertVertical(_ on: Bool) {
+        settings?.invertVertical = on
+        panel.invertVertical = on
+        applyScrollConfigs()
+    }
+
+    func setMulThousandths(_ thousandths: Int) {
+        settings?.mulThousandths = thousandths
+        // Read back so the mirror carries what storage actually clamped to.
+        panel.mulThousandths = settings?.mulThousandths ?? thousandths
+        applyScrollConfigs()
+    }
+
+    func setLaunchAtLogin(_ on: Bool) {
+        settings?.launchAtLogin = on
+        panel.launchAtLogin = on
+        syncLoginItem()
+    }
+
+    private func applyScrollConfigs() {
+        guard let settings else { return }
+        scrollVerticalConfig = settings.verticalScrollConfig
+        scrollHorizontalConfig = settings.horizontalScrollConfig
+        scrollAltDetection = settings.altTrackpadDetection
+    }
+
+    // Menu Quit per the spec: restore the acceleration property, re-associate
+    // the cursor, exit 0. The atexit restorer runs the same two calls again,
+    // which is fine because both are idempotent.
+    func quit() -> Never {
+        pointerAccel?.restore()
+        CGAssociateMouseAndMouseCursorPosition(1)
+        exit(0)
     }
 
     // Restore on every exit path: a stale disconnect leaves the cursor frozen
@@ -331,35 +489,195 @@ struct OnboardingView: View {
     }
 }
 
-// MARK: - Panel placeholder
+// MARK: - Panel
 
 struct CataclysmApp: App {
     var body: some Scene {
-        // Placeholder panel; Task 7 builds the real layout. `.window` style is
-        // a spec requirement: the scroll slider does not render in `.menu`.
+        // `.window` style is a spec requirement: the scroll slider does not
+        // render in `.menu`.
         MenuBarExtra("Cataclysm") {
-            PanelPlaceholderView()
+            PanelView(state: AppRuntime.shared.state, model: AppRuntime.shared.panel)
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-struct PanelPlaceholderView: View {
-    @ObservedObject var state = AppRuntime.shared.state
+// The default view (spec "The dropdown"): header, jail toggle with the game
+// row, acceleration toggle, invert-wheel toggle, scroll speed slider, Launch
+// at login, Quit. Width fixed at 320 points so the panel never reflows as
+// values change. The Advanced DisclosureGroup is Task 9.
+struct PanelView: View {
+    @ObservedObject var state: AppState
+    @ObservedObject var model: SettingsModel
+    // View-local drag state; committed to storage on release, since the panel
+    // dismisses on outside clicks and live preview is impossible anyway.
+    @State private var sliderPos = 0.0
+    @State private var draggingSlider = false
+
+    // Ungranted: both taps are down, so the jail and the scroll filter read
+    // unavailable rather than on. The acceleration property needs no grant
+    // but is only applied after trust (startup step 6), so its failure states
+    // can only exist while trusted.
+    private var jailFailed: Bool { state.featuresRunning && !state.jailTapUp }
+    private var scrollFailed: Bool { state.featuresRunning && !state.scrollTapUp }
+    private var accelFailed: Bool { state.accelWriteFailing || state.accelUnresponsive }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Cataclysm")
-            if !state.trusted {
-                Text("Accessibility access is off; the jail and scroll "
-                    + "filter are unavailable.")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Open Onboarding") { AppRuntime.shared.showOnboarding() }
+        VStack(alignment: .leading, spacing: 10) {
+            header
+            if state.trusted && !state.watcherRegistered { watcherRow }
+            Divider()
+            jailSection
+            Divider()
+            scrollSection
+            Divider()
+            footer
+        }
+        .padding(12)
+        .frame(width: 320)
+        .onAppear {
+            AppRuntime.shared.reloadPanel()
+            AppRuntime.shared.refreshWatcherStatus()
+            AppRuntime.shared.refreshAccelHealth()
+            sliderPos = sliderPosition(
+                forMultiplier: Double(model.mulThousandths) / 1_000)
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Cataclysm").font(.headline)
+            if state.trusted {
+                Text("Accessibility granted")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    Label("Accessibility not granted",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                    Spacer()
+                    Button("Grant…") { AppRuntime.shared.showOnboarding() }
+                }
             }
         }
-        .frame(width: 320)
-        .padding()
+    }
+
+    private var watcherRow: some View {
+        HStack {
+            Label(state.watcherRequiresApproval
+                    ? "Crash recovery needs approval"
+                    : "Crash recovery is off",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+            Spacer()
+            Button("Login Items…") {
+                let link = "x-apple.systempreferences:"
+                    + "com.apple.LoginItems-Settings.extension"
+                if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+            }
+        }
+    }
+
+    private var jailSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            featureToggle("Lock cursor to game window",
+                          isOn: model.jailEnabled,
+                          failed: jailFailed,
+                          set: { AppRuntime.shared.setJailEnabled($0) })
+            // Task 8 replaces this with the running-apps picker.
+            HStack {
+                Text("Game")
+                Spacer()
+                Text(model.targetName).foregroundStyle(.secondary)
+            }
+            .padding(.leading, 18)
+        }
+    }
+
+    private var scrollSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            accelToggle
+            featureToggle("Invert wheel scrolling",
+                          isOn: model.invertVertical,
+                          failed: scrollFailed,
+                          set: { AppRuntime.shared.setInvertVertical($0) })
+            sliderRow
+        }
+    }
+
+    private var accelToggle: some View {
+        featureToggle("Mouse acceleration off",
+                      isOn: model.accelOff,
+                      failed: accelFailed,
+                      unavailable: false,
+                      set: { AppRuntime.shared.setAccelerationOff($0) })
+    }
+
+    // One rendering rule for every feature toggle: unavailable reads
+    // unchecked and disabled, failed reads unchecked with a red caption
+    // rather than checked, and only a healthy feature shows its stored value.
+    private func featureToggle(_ title: String, isOn: Bool, failed: Bool,
+                               unavailable: Bool? = nil,
+                               set: @escaping (Bool) -> Void) -> some View {
+        let unavailable = unavailable ?? !state.trusted
+        return HStack {
+            Toggle(title, isOn: Binding(
+                get: { isOn && !unavailable && !failed },
+                set: set))
+                .toggleStyle(.checkbox)
+                .disabled(unavailable)
+            if failed {
+                Spacer()
+                Text("failed").font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private var sliderRow: some View {
+        // While dragging the readout previews the snapped release value;
+        // parked, it shows the stored value even beyond the slider's range.
+        let readout = draggingSlider
+            ? mulThousandths(forMultiplier: multiplier(forSliderPosition: sliderPos))
+            : model.mulThousandths
+        return HStack(spacing: 6) {
+            Text("Scroll speed")
+            Slider(value: $sliderPos, in: sliderPositionRange) { editing in
+                draggingSlider = editing
+                if !editing { commitSlider() }
+            }
+            Text(multiplierLabel(forThousandths: readout))
+                .monospacedDigit()
+            Button {
+                AppRuntime.shared.setMulThousandths(1_000)
+                sliderPos = sliderPosition(forMultiplier: 1.0)
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+            }
+            .buttonStyle(.borderless)
+            .help("Reset to 1.00x")
+        }
+        .disabled(!state.trusted || scrollFailed)
+    }
+
+    private func commitSlider() {
+        let thousandths = mulThousandths(
+            forMultiplier: multiplier(forSliderPosition: sliderPos))
+        AppRuntime.shared.setMulThousandths(thousandths)
+        sliderPos = sliderPosition(
+            forMultiplier: Double(AppRuntime.shared.panel.mulThousandths) / 1_000)
+    }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Launch at login", isOn: Binding(
+                get: { model.launchAtLogin },
+                set: { AppRuntime.shared.setLaunchAtLogin($0) }))
+                .toggleStyle(.checkbox)
+            if let error = state.loginItemError {
+                Text(error).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Quit") { AppRuntime.shared.quit() }
+        }
     }
 }
