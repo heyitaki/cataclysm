@@ -87,7 +87,10 @@ func setEngaged(_ on: Bool) {
 }
 
 func refresh() {
-    guard jailEnabled,
+    // tap != nil: engaging disassociates the hardware mouse from the cursor,
+    // and only the tap callback moves it afterwards. With no tap (tapCreate
+    // failed despite trust) that would freeze the cursor outright.
+    guard jailEnabled, tap != nil,
           let front = NSWorkspace.shared.frontmostApplication,
           front.bundleIdentifier == gameBundle else {
         clampArea = nil

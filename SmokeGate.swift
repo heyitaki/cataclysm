@@ -59,6 +59,19 @@ final class SmokeGate {
                        + "unregister it (Reset everything and quit, or "
                        + "System Settings > Login Items) before running the gate")
         else { return 1 }
+        // Same refusal for the legacy mechanism: legacyPath() boots out the
+        // label, then overwrites and deletes the plist at this exact path, so
+        // an installed copy registered through the fallback would lose its
+        // crash recovery. The instance lock does not cover this: the
+        // installed app need not be running for its agent to be loaded.
+        let legacyLive = runLaunchctl(
+            ["print", "gui/\(getuid())/\(watcherLabel)"]).code == 0
+            || FileManager.default.fileExists(atPath: legacyPlistURL.path)
+        guard step("legacy watcher not already installed", !legacyLive,
+                   detail: "an installed Cataclysm's legacy watcher job or "
+                       + "plist exists; remove it (Reset everything and quit) "
+                       + "before running the gate")
+        else { return 1 }
         if smAppServicePath() {
             print("SMOKE PASS (SMAppService)")
             return 0
@@ -68,6 +81,14 @@ final class SmokeGate {
         // check through that mechanism (spec: "If registration is refused,
         // run the same check against the ~/Library/LaunchAgents fallback").
         cleanupSM()
+        // A PASS must leave no registered agent; while the SM agent cannot be
+        // torn down, a legacy pass would print PASS over live residue.
+        guard step("SMAppService agent torn down", !smRegistered,
+                   detail: "unregister keeps failing; not attempting legacy")
+        else {
+            print("SMOKE FAIL")
+            return 1
+        }
         if legacyPath() {
             print("SMOKE PASS (legacy bootstrap; SMAppService refused)")
             return 0
@@ -205,8 +226,13 @@ final class SmokeGate {
 
     private func cleanupSM() {
         guard smRegistered else { return }
-        try? agent.unregister()
-        smRegistered = false
+        // Clear the flag only on success: an unregister that keeps throwing
+        // must keep the defer retrying and block the legacy path, or the gate
+        // could exit 0 with the agent still registered.
+        do {
+            try agent.unregister()
+            smRegistered = false
+        } catch {}
     }
 
     private func cleanupLegacy() {
