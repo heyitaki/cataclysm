@@ -35,9 +35,12 @@ struct CataclysmMain {
             runWatcher()
         }
         if args.contains("--smoke-register") {
-            // Task 11 implements the SMAppService registration smoke gate.
-            print("cataclysm --smoke-register: not implemented yet")
-            exit(0)
+            exit(SmokeGate().run())
+        }
+        // The CLI's scroll measurement flag lives on in the app: it only sets
+        // the dump global, then the launch proceeds normally.
+        if args.contains("--dump-scroll") {
+            scrollDump = true
         }
         AppRuntime.shared.preflight()
         AppRuntime.shared.start()
