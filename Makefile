@@ -42,12 +42,18 @@ restart: install
 	done; \
 	echo "helper did not restart; press cmd+alt+L twice"; exit 1
 
-test: build/scrollfilter-tests
+test: build/scrollfilter-tests build/settings-tests
 	./build/scrollfilter-tests
+	./build/settings-tests
 
 build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
 	mkdir -p build
 	xcrun swiftc -O ScrollFilter.swift tests/ScrollFilterTests.swift -o $@
+
+# ScrollFilter.swift supplies the clamp helpers Settings reuses.
+build/settings-tests: Settings.swift ScrollFilter.swift tests/SettingsTests.swift
+	mkdir -p build
+	xcrun swiftc -O Settings.swift ScrollFilter.swift tests/SettingsTests.swift -o $@
 
 clean:
 	rm -f $(BINARY)
