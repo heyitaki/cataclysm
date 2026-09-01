@@ -6,8 +6,11 @@ DEST = $(HS_DIR)/mousejail/$(BINARY)
 # run treats as up to date.
 .DELETE_ON_ERROR:
 
-$(BINARY): main.swift
-	xcrun swiftc -O main.swift -o $(BINARY)
+# Explicit source list: a *.swift glob breaks once a second entry point exists.
+CLI_SOURCES = main.swift Jail.swift TapHost.swift
+
+$(BINARY): $(CLI_SOURCES)
+	xcrun swiftc -O $(CLI_SOURCES) -o $(BINARY)
 
 # Replace by rename, never by writing over the destination: the helper is
 # executing that file, and rewriting its pages under it can kill it.

@@ -49,9 +49,9 @@ Traps already paid for, do not rediscover:
 
 ### Task 1: Split main.swift into modules
 
-- [ ] Move the clamp geometry and jail math into `Jail.swift` and tap creation/lifecycle into `TapHost.swift`; `main.swift` keeps argument parsing, wiring, and the run loop. Code moves verbatim except access-level and file-scope adjustments; same flags, same output, binary still `mousejail`.
-- [ ] Makefile `$(BINARY)` rule gets the explicit source list `main.swift Jail.swift TapHost.swift` and matching prerequisites.
-- [ ] `make` and `make test` exit 0; the diff reads as moved code, not rewritten logic.
+- [x] Move the clamp geometry and jail math into `Jail.swift` and tap creation/lifecycle into `TapHost.swift`; `main.swift` keeps argument parsing, wiring, and the run loop. Code moves verbatim except access-level and file-scope adjustments; same flags, same output, binary still `mousejail`.
+- [x] Makefile `$(BINARY)` rule gets the explicit source list `main.swift Jail.swift TapHost.swift` and matching prerequisites.
+- [x] `make` and `make test` exit 0; the diff reads as moved code, not rewritten logic.
 
 ### Task 2: Wire pointer acceleration into the CLI
 
