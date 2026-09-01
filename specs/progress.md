@@ -1,12 +1,12 @@
 # Remaining work
 
-The two design specs (`pointer-and-scroll.md`, `distribution-and-ui.md`) are implemented and deleted; recover them from git history if needed. Implementation landed on branch `cataclysm-distribution` (26 commits, unmerged as of 2026-09-01) via the ralphex run recorded in `docs/plans/completed/cataclysm-distribution.md`, whose Post-Completion section is the fuller version of the list below. `specs/evidence/verify.sh` is kept for the macOS floor pass: it re-checks the platform claims (Gatekeeper, iconutil, legacy launchd) the design relied on.
+The two design specs (`pointer-and-scroll.md`, `distribution-and-ui.md`) are implemented and deleted; recover them from git history if needed. Implementation merged to `main` as `cf186f8` on 2026-09-01, from the ralphex run recorded in `docs/plans/completed/cataclysm-distribution.md`, whose Post-Completion section is the fuller version of the list below. `specs/evidence/verify.sh` is kept for the macOS floor pass: it re-checks the platform claims (Gatekeeper, iconutil, legacy launchd) the design relied on.
 
 Everything below needs the user present; none of it is unattended-automatable.
 
 | # | Item | Notes |
 | --- | --- | --- |
-| r.1 | Review and merge `cataclysm-distribution`, then push | Final review-fix commit 04321fb was verified by tests but not re-reviewed (iteration cap); glance at it during review |
+| r.1 | Push `main` | Merge and its review fixes (`f201238`) are local only |
 | r.2 | Quit UnnaturalScrollWheels from its own menu, then uninstall | Its quit restores `HIDMouseAcceleration`; must happen before first Cataclysm launch with acceleration control on |
 | r.3 | First live run: onboarding, Accessibility grant, confirm jail/acceleration/scroll in game | Also observe which watcher path went live: SMAppService may report the self-signed agent enabled without spawning it; a 10s spawn check then installs the legacy launchctl fallback |
 | r.4 | Confirm bundle id `io.github.heyitaki.cataclysm` before first release | Cheap to change until real Accessibility grants exist, expensive after (TCC keys the grant to it) |
@@ -17,3 +17,17 @@ Everything below needs the user present; none of it is unattended-automatable.
 | r.9 | Icon artwork to replace the generated placeholder | |
 | r.10 | Developer ID membership decision: buy and notarize (`make release`, then the offline second-Mac install test), or ship `make dmg` with the README's Open Anyway walkthrough | This is all the $99 buys |
 | r.11 | Floor and hardware passes: macOS 13 (panel rendering, deep links, agent registration, login item), Intel or Rosetta launch, grant-in-Applications-then-run-from-Downloads | |
+
+## Known low-severity issues, from the merge review
+
+Left unfixed deliberately; none blocks use. Worth revisiting if the symptom shows up.
+
+- The 0.5s jail refresh and both tap callbacks share the main run loop, so Accessibility reads against a hung game (a few hundred ms) can stall scroll delivery and let the scroll tap disable by timeout until the next tick re-enables it.
+- If `mach_timebase_info` ever failed, the ticks-to-seconds factor would be NaN and per-axis scroll residue would never reset at the 250ms burst gap.
+- `--dump-scroll` prints inside the tap callback (allocation plus blocking I/O on the timed path); debug flag only.
+- `TapHost.swift` has no direct test coverage: the timebase conversion, the capture-before-write ordering, and the flatten pairing are exercised only by hand.
+- `legacyWatcherCurrent()` cannot distinguish the two mechanisms (they share one launchd label), so it can report the legacy job current when the hollow SMAppService job is what launchd holds.
+- After the spawn probe installs the fallback, the BTM record can return to enabled while the legacy plist stays on disk, so both registrations exist at once on ordinary launches. Reset now polls this away; nothing else depends on only one being present.
+- `bootOutLegacyWatcher()` returns success without booting out when the plist is missing, so a job loaded under the shared label with no file could block `register()`.
+- `recovery.originalMouseAcceleration` is an independent string literal in both `Settings.swift` and `PointerAccel.swift`, and no test links both.
+- `Settings.Key.all` is hand-maintained: a future key omitted from it would be silently skipped by "Reset to defaults".
