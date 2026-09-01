@@ -26,6 +26,7 @@ func checkEq<T: Equatable>(_ got: T, _ want: T, _ name: String) {
 struct WatcherTests {
     static func main() {
         releaseTests()
+        presenceTests()
         reregistrationTests()
         registrationPlanTests()
         derivationTests()
@@ -51,6 +52,51 @@ struct WatcherTests {
                 "present-to-present does not release")
         checkEq(watcherShouldRelease(previous: false, present: true), false,
                 "absent-to-present does not release")
+    }
+
+    // The watcher shares the app's bundle id, so it and any second watcher
+    // (legacy job beside the SMAppService agent) can appear in its own
+    // running-applications query; only a process not under --watch counts.
+    static func presenceTests() {
+        let argv: (pid_t) -> [String] = { pid in
+            switch pid {
+            case 500, 502: return ["/x/cataclysm", "--watch"]
+            case 501: return ["/x/cataclysm"]
+            default: return []
+            }
+        }
+        checkEq(watcherSeesApp(runningPIDs: [], ownPID: 500, argumentsOf: argv),
+                false, "no matching process: absent")
+        checkEq(watcherSeesApp(runningPIDs: [500], ownPID: 500, argumentsOf: argv),
+                false, "only the watcher itself: absent")
+        checkEq(watcherSeesApp(runningPIDs: [500, 502], ownPID: 500, argumentsOf: argv),
+                false, "two watchers and no app: absent")
+        checkEq(watcherSeesApp(runningPIDs: [500, 502, 501], ownPID: 500,
+                               argumentsOf: argv),
+                true, "two watchers plus the app: present")
+        checkEq(watcherSeesApp(runningPIDs: [501], ownPID: 500, argumentsOf: argv),
+                true, "the app alone: present")
+        checkEq(watcherSeesApp(runningPIDs: [503], ownPID: 500, argumentsOf: argv),
+                true, "unreadable arguments: counted as the app")
+
+        // KERN_PROCARGS2 parse: argc, exec path, NUL padding, argv, then env.
+        var bytes: [UInt8] = [2, 0, 0, 0]
+        bytes += Array("/x/cataclysm".utf8) + [0, 0, 0]
+        bytes += Array("/x/cataclysm".utf8) + [0]
+        bytes += Array("--watch".utf8) + [0]
+        bytes += Array("HOME=/u".utf8) + [0]
+        checkEq(parseProcArgs(bytes), ["/x/cataclysm", "--watch"],
+                "parses argc arguments and ignores the environment")
+        checkEq(parseProcArgs([1, 0, 0]), [], "truncated header: empty")
+        checkEq(parseProcArgs([3, 0, 0, 0] + Array("/x".utf8) + [0, 0]
+                              + Array("a".utf8) + [0]),
+                ["a"], "argc beyond the buffer stops at the end")
+
+        // Live read of this harness's own argv, which is the case the
+        // watcher relies on for a sibling watcher.
+        let own = processArguments(pid: getpid())
+        checkEq(own.first?.hasSuffix("watcher-tests") ?? false, true,
+                "own argv reads back through sysctl")
     }
 
     static func reregistrationTests() {

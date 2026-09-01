@@ -148,8 +148,12 @@ final class PointerAccel {
     // Exit paths must not report health: the process is going away and a
     // callback here would latch a failure no later write can clear, or run
     // against a half-deallocated owner on the deinit path.
-    func restore() {
-        guard holding else { return }
+    // Returns whether the claim is released afterwards; false only when the
+    // property still reads -1 and the write of the original failed, the one
+    // case where the stored original must survive for a later restore.
+    @discardableResult
+    func restore() -> Bool {
+        guard holding else { return true }
         switch read() {
         case .value(Self.disabled), .unavailable:
             if original == nil {
@@ -166,6 +170,7 @@ final class PointerAccel {
         case .value, .unreadable:
             holding = false
         }
+        return !holding
     }
 
     deinit {

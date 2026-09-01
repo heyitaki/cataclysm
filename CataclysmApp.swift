@@ -31,7 +31,7 @@ var scrollDump = false
 struct CataclysmMain {
     static func main() {
         let args = CommandLine.arguments.dropFirst()
-        if args.contains("--watch") {
+        if args.contains(watcherFlag) {
             runWatcher()
         }
         if args.contains("--smoke-register") {
@@ -55,9 +55,12 @@ struct CataclysmMain {
     static func runWatcher() -> Never {
         var previous: Bool?
         let timer = Timer(timeInterval: 1.0, repeats: true) { _ in
-            let present = !NSRunningApplication
-                .runningApplications(withBundleIdentifier: cataclysmBundleID)
-                .isEmpty
+            let present = watcherSeesApp(
+                runningPIDs: NSRunningApplication
+                    .runningApplications(withBundleIdentifier: cataclysmBundleID)
+                    .map(\.processIdentifier),
+                ownPID: ProcessInfo.processInfo.processIdentifier,
+                argumentsOf: processArguments(pid:))
             if watcherShouldRelease(previous: previous, present: present) {
                 CGAssociateMouseAndMouseCursorPosition(1)
             }
@@ -103,6 +106,9 @@ final class AppState: ObservableObject {
     // area, never in a log nobody reads.
     @Published var watcherError: String?
     @Published var loginItemError: String?
+    // "Reset everything and quit" found state it could not tear down and
+    // erased nothing; names what is still in place.
+    @Published var resetError: String?
     // RegisterEventHotKey refused the chord (another app owns it). Shows in
     // the hotkey row rather than leaving a recorded chord that does nothing.
     @Published var hotkeyRegistrationFailed = false
@@ -394,7 +400,19 @@ final class AppRuntime {
             versionChanged: needsWatcherReregistration(
                 lastRegistered: settings.lastRegisteredVersion, current: version))
         if plan.unregisterFirst {
-            try? agent.unregister()
+            do {
+                try agent.unregister()
+            } catch {
+                // The stale agent is still enabled. Registering over it, or
+                // installing the legacy job beside it, and then recording
+                // this version would make every later launch read "same
+                // version, enabled" and never retry. Surface it and leave
+                // the recorded version alone so the next launch retries.
+                state.watcherError = "Crash recovery update failed: "
+                    + error.localizedDescription
+                refreshWatcherStatus()
+                return
+            }
         }
         if plan.register {
             do {
@@ -402,8 +420,10 @@ final class AppRuntime {
                 settings.lastRegisteredVersion = version
                 state.watcherError = nil
                 // A legacy job left over from a build SMAppService refused is
-                // now redundant; two watchers are harmless but one shows as a
-                // stray Login Item.
+                // now redundant. A teardown failure is not surfaced: the
+                // watcher counts only processes not under --watch as the app, so
+                // two watchers still recover correctly; the cost is a stray
+                // Login Item, which "Reset everything and quit" reports.
                 bootOutLegacyWatcher()
             } catch {
                 // register() also throws while the agent sits in Login
@@ -669,12 +689,36 @@ final class AppRuntime {
     // acceleration value is destroyed while the live property is still -1.
     // Then unregister the watcher agent and the login item (and boot out the
     // legacy plist if one exists), then clear everything, then exit.
-    func resetEverythingAndQuit() -> Never {
-        pointerAccel?.restore()
+    // The clear is gated on every teardown step having actually taken
+    // effect: a failed restore leaves the property at -1 with the stored
+    // original as its only record, and a registration that survived would
+    // outlive the settings that know about it. On failure nothing is erased,
+    // the app keeps running, and the panel says what is still in place so a
+    // retry is possible. Every step is idempotent, so a retry only redoes
+    // what failed.
+    func resetEverythingAndQuit() {
+        var remaining: [String] = []
+        if let pointerAccel, !pointerAccel.restore() {
+            remaining.append("pointer acceleration could not be restored")
+        }
         CGAssociateMouseAndMouseCursorPosition(1)
-        try? SMAppService.agent(plistName: watcherPlistName).unregister()
-        bootOutLegacyWatcher()
+        let agent = SMAppService.agent(plistName: watcherPlistName)
+        try? agent.unregister()
+        if agent.status == .enabled || agent.status == .requiresApproval {
+            remaining.append("the crash-recovery agent is still registered")
+        }
+        if let failure = bootOutLegacyWatcher() { remaining.append(failure) }
         try? SMAppService.mainApp.unregister()
+        if SMAppService.mainApp.status == .enabled
+            || SMAppService.mainApp.status == .requiresApproval {
+            remaining.append("the login item is still registered")
+        }
+        guard remaining.isEmpty else {
+            state.resetError = "Reset stopped, nothing erased: "
+                + remaining.joined(separator: "; ")
+            refreshWatcherStatus()
+            return
+        }
         UserDefaults.standard.removePersistentDomain(
             forName: Bundle.main.bundleIdentifier ?? cataclysmBundleID)
         exit(0)
@@ -682,12 +726,24 @@ final class AppRuntime {
 
     // Boots out and deletes the legacy job. Run by "Reset everything and
     // quit" and after a successful SMAppService registration that makes a
-    // leftover legacy job redundant.
-    private func bootOutLegacyWatcher() {
+    // leftover legacy job redundant. Returns a failure description, or nil
+    // once the job is neither loaded nor on disk. bootout's exit code is not
+    // the signal: it is nonzero for a job that was never loaded, which is
+    // the normal state of a plist whose bootstrap failed, so the job's
+    // presence in launchd is probed instead before the file goes.
+    @discardableResult
+    private func bootOutLegacyWatcher() -> String? {
         guard FileManager.default.fileExists(atPath: legacyWatcherPlistURL.path)
-        else { return }
-        runLaunchctl(["bootout", "gui/\(getuid())/\(legacyWatcherLabel)"])
+        else { return nil }
+        let target = "gui/\(getuid())/\(legacyWatcherLabel)"
+        runLaunchctl(["bootout", target])
+        guard runLaunchctl(["print", target]).code != 0 else {
+            return "the legacy crash-recovery job is still loaded in launchd"
+        }
         try? FileManager.default.removeItem(at: legacyWatcherPlistURL)
+        guard !FileManager.default.fileExists(atPath: legacyWatcherPlistURL.path)
+        else { return "the legacy crash-recovery plist could not be deleted" }
+        return nil
     }
 
     private func applyScrollConfigs() {
@@ -879,6 +935,10 @@ struct PanelView: View {
             if state.trusted && !state.watcherRegistered { watcherRow }
             if let watcherError = state.watcherError {
                 Text(watcherError).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let resetError = state.resetError {
+                Text(resetError).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
