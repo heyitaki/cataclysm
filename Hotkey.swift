@@ -38,6 +38,20 @@ func isValidHotkeyChord(modifiers: Int) -> Bool {
     modifiers & (CarbonModifiers.cmd | CarbonModifiers.option | CarbonModifiers.control) != 0
 }
 
+// Stored chord values come from UserDefaults, which a hand-edited plist can
+// make negative or huge — and RegisterEventHotKey takes both through UInt32
+// conversions, so an unvalidated read would crash on every launch until a
+// manual `defaults delete`. A stored pair is usable only when the key code
+// is a hardware key code and the modifiers are a chord the recorder could
+// have produced (the four Carbon bits, with a command-class one set).
+func isValidStoredHotkey(keyCode: Int, modifiers: Int) -> Bool {
+    let knownBits = CarbonModifiers.cmd | CarbonModifiers.shift
+        | CarbonModifiers.option | CarbonModifiers.control
+    return (0...0xFFFF).contains(keyCode)
+        && modifiers & ~knownBits == 0
+        && isValidHotkeyChord(modifiers: modifiers)
+}
+
 // Modifier symbols in the standard macOS display order: control, option,
 // shift, command.
 func hotkeyChordLabel(keyCode: Int, modifiers: Int) -> String {

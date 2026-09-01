@@ -28,10 +28,18 @@ let markerKey = "recovery.migratedFromLegacyDomain"
 
 var scratchSuites: [String] = []
 
+// Pid-scoped so two concurrent runs on one machine can never wipe each
+// other's domains; checks that need the raw domain name derive it from here
+// rather than restating the literal.
+func scratchSuiteName(_ name: String) -> String {
+    "io.github.heyitaki.cataclysm.settings-tests."
+        + "\(ProcessInfo.processInfo.processIdentifier).\(name)"
+}
+
 // A fresh, empty defaults domain; wiped on creation in case a previous run
 // died before cleanup, and again at exit.
 func scratch(_ name: String) -> UserDefaults {
-    let suite = "io.github.heyitaki.cataclysm.settings-tests.\(name)"
+    let suite = scratchSuiteName(name)
     guard let d = UserDefaults(suiteName: suite) else {
         fatalError("could not create scratch suite \(suite)")
     }
@@ -51,6 +59,7 @@ struct SettingsTests {
     static func main() {
         defaultsTests()
         clampTests()
+        hotkeyTests()
         resetTests()
         migrationTests()
         cleanup()
@@ -82,10 +91,11 @@ struct SettingsTests {
               "no recovery. key is a preference")
 
         // Reads never write anything back into an untouched domain (the
-        // migration marker is the one deliberate exception).
-        let residue = store.persistentDomain(
-            forName: "io.github.heyitaki.cataclysm.settings-tests.defaults")?
-            .keys.filter { $0 != markerKey } ?? []
+        // migration marker is the one deliberate exception). The nil coalesce
+        // is a sentinel, not empty: a missing domain would mean the check
+        // inspected nothing and must fail rather than pass vacuously.
+        let residue = store.persistentDomain(forName: scratchSuiteName("defaults"))?
+            .keys.filter { $0 != markerKey } ?? ["<domain missing>"]
         check(residue.isEmpty, "defaults read leaves storage empty", "found \(residue)")
     }
 
@@ -137,6 +147,16 @@ struct SettingsTests {
         checkEq(s.targetBundleID, "com.riotgames.LeagueofLegends.GameClient",
                 "string: empty bundle id falls back to default")
 
+        // NSNumber bridges booleans to Int (true is 1) and numbers to Bool,
+        // so the boolean/number distinction has to be checked explicitly.
+        // Keys are chosen so coercion and fallback differ: invertHorizontal
+        // defaults false (coercing 1 would read true), cornerRadius defaults
+        // 18 (coercing true would read 1.0).
+        store.set(1, forKey: Settings.Key.invertHorizontal)
+        checkEq(s.invertHorizontal, false, "bool: stored number falls back")
+        store.set(true, forKey: Settings.Key.cornerRadius)
+        checkEq(s.cornerRadius, 18.0, "double: stored boolean falls back")
+
         // Setters clamp before persisting.
         s.linesPerNotch = 0
         checkEq(store.object(forKey: Settings.Key.linesPerNotch) as? Int, 1,
@@ -165,6 +185,45 @@ struct SettingsTests {
                 "horizontal scroll config snapshot")
     }
 
+    // The stored chord validates as a pair: anything RegisterEventHotKey
+    // could not take without trapping (negative, beyond UInt32), a chord the
+    // recorder could never produce (unknown bits, no command-class modifier),
+    // or a wrong type falls back to the default chord wholesale.
+    static func hotkeyTests() {
+        let store = scratch("hotkey")
+        let s = Settings(defaults: store, legacy: nil)
+
+        store.set(40, forKey: Settings.Key.hotkeyKeyCode)
+        store.set(0x0100, forKey: Settings.Key.hotkeyModifiers)
+        checkEq(s.hotkeyKeyCode, 40, "hotkey: valid key code reads back")
+        checkEq(s.hotkeyModifiers, 0x0100, "hotkey: valid modifiers read back")
+
+        store.set(-1, forKey: Settings.Key.hotkeyKeyCode)
+        checkEq(s.hotkeyKeyCode, 37, "hotkey: negative key code falls back")
+        checkEq(s.hotkeyModifiers, 0x0100 | 0x0800,
+                "hotkey: the pair falls back together")
+
+        store.set(0x10000, forKey: Settings.Key.hotkeyKeyCode)
+        checkEq(s.hotkeyKeyCode, 37, "hotkey: oversized key code falls back")
+
+        store.set(40, forKey: Settings.Key.hotkeyKeyCode)
+        store.set(-0x0100, forKey: Settings.Key.hotkeyModifiers)
+        checkEq(s.hotkeyModifiers, 0x0100 | 0x0800,
+                "hotkey: negative modifiers fall back")
+        store.set(0x0200, forKey: Settings.Key.hotkeyModifiers)
+        checkEq(s.hotkeyModifiers, 0x0100 | 0x0800,
+                "hotkey: shift-only chord falls back")
+        store.set(0x0100 | 0x40000, forKey: Settings.Key.hotkeyModifiers)
+        checkEq(s.hotkeyModifiers, 0x0100 | 0x0800,
+                "hotkey: unknown modifier bits fall back")
+
+        // Wrong type goes through the shared int() fallback; true would
+        // otherwise bridge to key code 1.
+        store.set(0x0100, forKey: Settings.Key.hotkeyModifiers)
+        store.set(true, forKey: Settings.Key.hotkeyKeyCode)
+        checkEq(s.hotkeyKeyCode, 37, "hotkey: boolean key code falls back")
+    }
+
     static func resetTests() {
         let store = scratch("reset")
         let s = Settings(defaults: store, legacy: nil)
@@ -189,6 +248,13 @@ struct SettingsTests {
         check(store.bool(forKey: markerKey), "reset: spares migration marker")
         checkEq(store.string(forKey: "future.unknownKey"), "keep",
                 "reset: leaves unknown keys untouched")
+
+        // The nil setter removes the key directly; resetToDefaults reaches
+        // the same state through removeObject, bypassing the setter.
+        s.lastRegisteredVersion = "1.0.0"
+        s.lastRegisteredVersion = nil
+        check(store.object(forKey: Settings.Key.lastRegisteredVersion) == nil,
+              "version: nil setter removes the stored key")
     }
 
     static func migrationTests() {

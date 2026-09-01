@@ -28,12 +28,25 @@ func launchctlOutputResolvesExecutable(_ output: String,
 // nil when the job has no live process. An SMAppService BundleProgram job
 // keeps its program identifier bundle-relative in the dump until spawn, so
 // the pid (checked against proc_pidpath by the caller) is what proves
-// launchd resolved the executable inside the bundle.
+// launchd resolved the executable inside the bundle. Only the leading digits
+// are read, so a dump format that annotates the pid still parses.
 func launchctlPid(inOutput output: String) -> Int32? {
     for rawLine in output.split(separator: "\n") {
         let line = rawLine.trimmingCharacters(in: .whitespaces)
         guard line.hasPrefix("pid = ") else { continue }
-        return Int32(line.dropFirst("pid = ".count))
+        return Int32(line.dropFirst("pid = ".count).prefix(while: \.isNumber))
     }
     return nil
+}
+
+// The gate's whole resolution decision: the absolute path in the dump, or a
+// live pid whose true executable (pathForPid, proc_pidpath in production)
+// matches the in-bundle path. Either proves launchd resolved the executable.
+func smokeResolution(output: String, executablePath: String,
+                     pathForPid: (Int32) -> String?) -> Bool {
+    if launchctlOutputResolvesExecutable(output, executablePath: executablePath) {
+        return true
+    }
+    guard let pid = launchctlPid(inOutput: output) else { return false }
+    return pathForPid(pid) == executablePath
 }

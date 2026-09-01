@@ -26,6 +26,7 @@ struct SmokeTests {
     static func main() {
         stepLineTests()
         resolutionTests()
+        combinedResolutionTests()
         pidTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
@@ -78,6 +79,47 @@ struct SmokeTests {
                 false, "empty output does not resolve")
         checkEq(launchctlOutputResolvesExecutable(smDump, executablePath: ""),
                 false, "empty expected path never resolves")
+
+        // Deliberate heuristic, pinned: the absolute path counts wherever it
+        // appears in the dump, not only on program lines. launchd puts the
+        // path only on program/arguments lines for these jobs in practice;
+        // tightening would couple the gate to dump formatting.
+        checkEq(launchctlOutputResolvesExecutable(
+                    "path = \(exec)", executablePath: exec),
+                true, "any dump line containing the path counts as resolved")
+    }
+
+    // The gate's combined decision: absolute path in the dump, or a live pid
+    // whose kernel-reported executable matches the in-bundle path.
+    static func combinedResolutionTests() {
+        let exec = "/Applications/Cataclysm.app/Contents/MacOS/cataclysm"
+        let unspawned = """
+        io.github.heyitaki.cataclysm.watch = {
+        \tprogram identifier = Contents/MacOS/cataclysm (mode: 2)
+        \tstate = not running
+        }
+        """
+        let spawned = """
+        io.github.heyitaki.cataclysm.watch = {
+        \tprogram identifier = Contents/MacOS/cataclysm (mode: 2)
+        \tpid = 77
+        }
+        """
+        checkEq(smokeResolution(output: "program = \(exec)", executablePath: exec,
+                                pathForPid: { _ in nil }),
+                true, "absolute path resolves without consulting the pid")
+        checkEq(smokeResolution(output: spawned, executablePath: exec,
+                                pathForPid: { $0 == 77 ? exec : nil }),
+                true, "relative dump resolves through the pid's true path")
+        checkEq(smokeResolution(output: spawned, executablePath: exec,
+                                pathForPid: { _ in "/usr/bin/true" }),
+                false, "a pid running something else does not resolve")
+        checkEq(smokeResolution(output: spawned, executablePath: exec,
+                                pathForPid: { _ in nil }),
+                false, "an unreadable pid path does not resolve")
+        checkEq(smokeResolution(output: unspawned, executablePath: exec,
+                                pathForPid: { _ in exec }),
+                false, "no pid and no absolute path never resolves")
     }
 
     static func pidTests() {
@@ -90,6 +132,8 @@ struct SmokeTests {
         }
         """
         checkEq(launchctlPid(inOutput: dump), 4821, "pid line parses")
+        checkEq(launchctlPid(inOutput: "\tpid = 4821 (spawned)"), 4821,
+                "annotated pid line still parses the leading digits")
         checkEq(launchctlPid(inOutput: "state = not running"), nil,
                 "no pid line reads as no process")
         checkEq(launchctlPid(inOutput: "\tpid = junk"), nil,

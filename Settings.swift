@@ -79,18 +79,26 @@ final class Settings {
 
     // object(forKey:) plus a conditional cast, never the coercing bool/
     // integer(forKey:) accessors: a hand-edited plist with a string where a
-    // number belongs must fall back to the default, not coerce to 0.
+    // number belongs must fall back to the default, not coerce to 0. NSNumber
+    // bridges CFBoolean to Int (true becomes 1) and any number to Bool, so
+    // the boolean/number distinction is checked explicitly too.
     private func bool(_ key: String, or fallback: Bool) -> Bool {
-        defaults.object(forKey: key) as? Bool ?? fallback
+        guard let number = defaults.object(forKey: key) as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else { return fallback }
+        return number.boolValue
     }
 
     private func int(_ key: String, or fallback: Int) -> Int {
-        defaults.object(forKey: key) as? Int ?? fallback
+        guard let number = defaults.object(forKey: key) as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              let value = number as? Int else { return fallback }
+        return value
     }
 
     private func finiteDouble(_ key: String, or fallback: Double) -> Double {
-        guard let value = defaults.object(forKey: key) as? Double,
-              value.isFinite else { return fallback }
+        guard let number = defaults.object(forKey: key) as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              let value = number as? Double, value.isFinite else { return fallback }
         return value
     }
 
@@ -158,13 +166,26 @@ final class Settings {
         set { defaults.set(newValue, forKey: Key.altTrackpadDetection) }
     }
 
+    // The chord validates as a pair (Hotkey.swift's isValidStoredHotkey): a
+    // value RegisterEventHotKey could not take without trapping, or a chord
+    // the recorder could never produce, falls back to the default chord
+    // wholesale so key code and modifiers always describe the same chord.
+    private var storedHotkey: (keyCode: Int, modifiers: Int) {
+        let keyCode = int(Key.hotkeyKeyCode, or: Default.hotkeyKeyCode)
+        let modifiers = int(Key.hotkeyModifiers, or: Default.hotkeyModifiers)
+        guard isValidStoredHotkey(keyCode: keyCode, modifiers: modifiers) else {
+            return (Default.hotkeyKeyCode, Default.hotkeyModifiers)
+        }
+        return (keyCode, modifiers)
+    }
+
     var hotkeyKeyCode: Int {
-        get { int(Key.hotkeyKeyCode, or: Default.hotkeyKeyCode) }
+        get { storedHotkey.keyCode }
         set { defaults.set(newValue, forKey: Key.hotkeyKeyCode) }
     }
 
     var hotkeyModifiers: Int {
-        get { int(Key.hotkeyModifiers, or: Default.hotkeyModifiers) }
+        get { storedHotkey.modifiers }
         set { defaults.set(newValue, forKey: Key.hotkeyModifiers) }
     }
 

@@ -8,7 +8,11 @@ APP = build/Cataclysm.app
 .DELETE_ON_ERROR:
 
 # Explicit source list; a *.swift glob would silently pick up any stray file.
-APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift
+APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift JailMath.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift
+
+# Extra codesign flags for the release path (--timestamp); local builds stay
+# offline-friendly without one.
+CODESIGN_FLAGS ?=
 
 # Bare `make` builds the app; the standalone CLI is retired.
 all: app
@@ -29,6 +33,9 @@ build/cataclysm: build/cataclysm-arm64 build/cataclysm-x86_64
 # Bundle assembly is cheap, so `app` rebuilds it every run rather than trusting
 # a directory mtime. Signing identity is self-signed; CSSMERR_TP_NOT_TRUSTED
 # from find-identity is expected, the working check is that codesign succeeds.
+# --options runtime (hardened runtime) is mandatory for notarization and
+# harmless locally, so every build carries it; IDENTITY is quoted because the
+# release identity ("Developer ID Application: ...") contains spaces.
 app: build/cataclysm build/Cataclysm.icns packaging/Info.plist.in packaging/$(BUNDLE_ID).watch.plist
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(APP)/Contents/Library/LaunchAgents
@@ -38,7 +45,7 @@ app: build/cataclysm build/Cataclysm.icns packaging/Info.plist.in packaging/$(BU
 	cp build/cataclysm $(APP)/Contents/MacOS/cataclysm
 	plutil -lint $(APP)/Contents/Info.plist
 	plutil -lint $(APP)/Contents/Library/LaunchAgents/$(BUNDLE_ID).watch.plist
-	codesign -f -s $(IDENTITY) $(APP)
+	codesign -f --options runtime $(CODESIGN_FLAGS) -s "$(IDENTITY)" $(APP)
 	codesign --verify --strict $(APP)
 
 build/icon-gen: packaging/IconGen.swift
@@ -67,7 +74,10 @@ build/Cataclysm.icns: build/icon-1024.png
 	cp build/icon-1024.png build/Cataclysm.iconset/icon_512x512@2x.png
 	iconutil -c icns build/Cataclysm.iconset -o $@ || sips -s format icns build/icon-1024.png --out $@ >/dev/null
 
-test: build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/smoke-tests
+# typecheck first: the unit harnesses link only the pure modules, so without
+# it a rename in app-only code leaves `make test` green while `make app`
+# breaks for the next builder.
+test: typecheck build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/smoke-tests build/jailmath-tests
 	./build/scrollfilter-tests
 	./build/settings-tests
 	./build/startup-tests
@@ -76,15 +86,21 @@ test: build/scrollfilter-tests build/settings-tests build/startup-tests build/pa
 	./build/hotkey-tests
 	./build/watcher-tests
 	./build/smoke-tests
+	./build/jailmath-tests
+
+# Whole-app compile check without linking, lipo, or signing.
+typecheck: $(APP_SOURCES) Bridging.h
+	xcrun swiftc -typecheck -import-objc-header Bridging.h $(APP_SOURCES)
 
 build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
 	mkdir -p build
 	xcrun swiftc -O ScrollFilter.swift tests/ScrollFilterTests.swift -o $@
 
-# ScrollFilter.swift supplies the clamp helpers Settings reuses.
-build/settings-tests: Settings.swift ScrollFilter.swift tests/SettingsTests.swift
+# ScrollFilter.swift supplies the clamp helpers and Hotkey.swift the stored-
+# chord validation Settings reuses.
+build/settings-tests: Settings.swift ScrollFilter.swift Hotkey.swift tests/SettingsTests.swift
 	mkdir -p build
-	xcrun swiftc -O Settings.swift ScrollFilter.swift tests/SettingsTests.swift -o $@
+	xcrun swiftc -O Settings.swift ScrollFilter.swift Hotkey.swift tests/SettingsTests.swift -o $@
 
 build/startup-tests: Startup.swift tests/StartupTests.swift
 	mkdir -p build
@@ -110,6 +126,10 @@ build/smoke-tests: Smoke.swift tests/SmokeTests.swift
 	mkdir -p build
 	xcrun swiftc -O Smoke.swift tests/SmokeTests.swift -o $@
 
+build/jailmath-tests: JailMath.swift tests/JailMathTests.swift
+	mkdir -p build
+	xcrun swiftc -O JailMath.swift tests/JailMathTests.swift -o $@
+
 DMG = build/Cataclysm-$(VERSION).dmg
 
 # Drag-to-install image: app plus an /Applications symlink, Finder default
@@ -122,7 +142,7 @@ dmg: app
 	cp -R $(APP) build/dmg-stage/
 	ln -s /Applications build/dmg-stage/Applications
 	hdiutil create -volname Cataclysm -srcfolder build/dmg-stage -ov -format UDZO $(DMG)
-	codesign -f -s $(IDENTITY) $(DMG)
+	codesign -f $(CODESIGN_FLAGS) -s "$(IDENTITY)" $(DMG)
 	codesign --verify $(DMG)
 
 # Notarized release. Refuses up front, before building anything, when the
@@ -136,11 +156,11 @@ release:
 	*) echo 'make release: IDENTITY is "$(IDENTITY)", but notarization needs a "Developer ID Application: ..." identity. Pass IDENTITY="Developer ID Application: <name> (<team>)" or use `make dmg` for a local-identity image.'; exit 1;; \
 	esac
 	@test -n "$(NOTARY_PROFILE)" || { echo 'make release: NOTARY_PROFILE is unset. Store credentials once with `xcrun notarytool store-credentials <profile>` and pass NOTARY_PROFILE=<profile>.'; exit 1; }
-	$(MAKE) dmg VERSION=$(VERSION) IDENTITY="$(IDENTITY)"
+	$(MAKE) dmg VERSION=$(VERSION) IDENTITY="$(IDENTITY)" CODESIGN_FLAGS=--timestamp
 	xcrun notarytool submit $(DMG) --keychain-profile "$(NOTARY_PROFILE)" --wait
 	xcrun stapler staple $(DMG)
 
 clean:
 	rm -rf build
 
-.PHONY: all app test clean dmg release
+.PHONY: all app test typecheck clean dmg release

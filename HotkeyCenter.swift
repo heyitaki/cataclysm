@@ -22,12 +22,17 @@ final class HotkeyCenter {
     func apply(keyCode: Int, modifiers: Int) -> Bool {
         installHandlerIfNeeded()
         unregister()
+        // Settings validates stored chords, but the trapping UInt32(_:) must
+        // never be the last line of defense: an unrepresentable value is a
+        // failed registration, not a crash.
+        guard let code = UInt32(exactly: keyCode),
+              let mods = UInt32(exactly: modifiers) else { return false }
         var ref: EventHotKeyRef?
         // Four-char "CTCL"; the id is arbitrary but must match nothing else
         // this process registers (it registers only this one).
         let hotKeyID = EventHotKeyID(signature: OSType(0x4354_434C), id: 1)
         let status = RegisterEventHotKey(
-            UInt32(keyCode), UInt32(modifiers), hotKeyID,
+            code, mods, hotKeyID,
             GetApplicationEventTarget(), 0, &ref)
         guard status == noErr, let ref else { return false }
         hotKeyRef = ref

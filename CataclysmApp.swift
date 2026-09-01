@@ -350,18 +350,23 @@ final class AppRuntime {
 
     // MARK: - Watcher registration
 
-    private var legacyWatcherLabel: String { "\(cataclysmBundleID).watch" }
+    // Label, plist path, and executable path all come from the shared
+    // derivations in Watcher.swift, the same ones the smoke gate validates.
+
+    private var legacyWatcherLabel: String {
+        watcherJobLabel(bundleID: cataclysmBundleID)
+    }
 
     private var legacyWatcherPlistURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/\(legacyWatcherLabel).plist")
+        legacyWatcherPlistLocation(
+            home: FileManager.default.homeDirectoryForCurrentUser,
+            bundleID: cataclysmBundleID)
     }
 
     // The absolute path the legacy plist carries; derived from bundleURL every
     // read so a moved bundle is noticed, never cached.
     private var watcherExecutablePath: String {
-        Bundle.main.bundleURL
-            .appendingPathComponent("Contents/MacOS/cataclysm").path
+        watcherExecutable(inBundle: Bundle.main.bundleURL)
     }
 
     private func appVersion() -> String {
@@ -376,12 +381,14 @@ final class AppRuntime {
         guard let settings else { return }
         let agent = SMAppService.agent(plistName: watcherPlistName)
         let version = appVersion()
-        let versionChanged = needsWatcherReregistration(
-            lastRegistered: settings.lastRegisteredVersion, current: version)
-        if agent.status == .enabled, versionChanged {
+        let plan = watcherRegistrationPlan(
+            statusEnabled: agent.status == .enabled,
+            versionChanged: needsWatcherReregistration(
+                lastRegistered: settings.lastRegisteredVersion, current: version))
+        if plan.unregisterFirst {
             try? agent.unregister()
         }
-        if agent.status != .enabled || versionChanged {
+        if plan.register {
             do {
                 try agent.register()
                 settings.lastRegisteredVersion = version
@@ -422,7 +429,7 @@ final class AppRuntime {
             runLaunchctl(["bootout", "gui/\(getuid())/\(legacyWatcherLabel)"])
             try data.write(to: legacyWatcherPlistURL)
             guard runLaunchctl(
-                ["bootstrap", "gui/\(getuid())", legacyWatcherPlistURL.path]) == 0
+                ["bootstrap", "gui/\(getuid())", legacyWatcherPlistURL.path]).code == 0
             else { return "legacy bootstrap failed" }
             return nil
         } catch {
@@ -440,18 +447,6 @@ final class AppRuntime {
         if let failure = installLegacyWatcher() {
             state.watcherError = "Crash recovery failed after the app moved: \(failure)"
         }
-    }
-
-    @discardableResult
-    private func runLaunchctl(_ arguments: [String]) -> Int32 {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        proc.arguments = arguments
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        do { try proc.run() } catch { return -1 }
-        proc.waitUntilExit()
-        return proc.terminationStatus
     }
 
     // Launch at login is SMAppService.mainApp, independent of the watcher
@@ -484,7 +479,7 @@ final class AppRuntime {
 
     private func legacyWatcherLoaded() -> Bool {
         FileManager.default.fileExists(atPath: legacyWatcherPlistURL.path)
-            && runLaunchctl(["print", "gui/\(getuid())/\(legacyWatcherLabel)"]) == 0
+            && runLaunchctl(["print", "gui/\(getuid())/\(legacyWatcherLabel)"]).code == 0
     }
 
     // MARK: - Panel write-through
@@ -539,11 +534,16 @@ final class AppRuntime {
     func setAccelerationOff(_ on: Bool) {
         settings?.accelerationOff = on
         panel.accelOff = on
-        guard state.featuresRunning else { return }
         if on {
+            // The enable half waits for trust: startup step 6 owns when the
+            // property is first taken.
+            guard state.featuresRunning else { return }
             startAcceleration()
-        } else {
+        } else if pointerAccel != nil {
             // disable() restores the original and stops the reassert timer.
+            // Runs even while ungranted: a revoked grant leaves pointerAccel
+            // holding the property (stopFeatures keeps it under control), so
+            // the off half must not wait for featuresRunning.
             pointerAccel?.disable()
             pointerAccel = nil
             state.accelWriteFailing = false

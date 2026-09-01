@@ -33,6 +33,7 @@ struct HotkeyTests {
     static func main() {
         conversionTests()
         validityTests()
+        storedValidityTests()
         labelTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
@@ -69,6 +70,33 @@ struct HotkeyTests {
         check(!isValidHotkeyChord(modifiers: 0), "invalid: no modifiers")
         check(!isValidHotkeyChord(modifiers: CarbonModifiers.shift),
               "invalid: shift alone")
+    }
+
+    // Stored values reach RegisterEventHotKey through UInt32 conversions, so
+    // anything unrepresentable (or a chord the recorder could never produce)
+    // must be rejected before Settings hands it over.
+    static func storedValidityTests() {
+        check(isValidStoredHotkey(keyCode: 37,
+                                  modifiers: CarbonModifiers.cmd
+                                      | CarbonModifiers.option),
+              "stored: the shipped default chord is valid")
+        check(isValidStoredHotkey(keyCode: 0, modifiers: CarbonModifiers.cmd),
+              "stored: key code 0 (A) is valid")
+        check(isValidStoredHotkey(keyCode: 0xFFFF, modifiers: CarbonModifiers.cmd),
+              "stored: the top hardware key code is valid")
+        check(!isValidStoredHotkey(keyCode: -1, modifiers: CarbonModifiers.cmd),
+              "stored: negative key code is invalid")
+        check(!isValidStoredHotkey(keyCode: 0x10000, modifiers: CarbonModifiers.cmd),
+              "stored: key code beyond hardware range is invalid")
+        check(!isValidStoredHotkey(keyCode: 37, modifiers: -CarbonModifiers.cmd),
+              "stored: negative modifiers are invalid")
+        check(!isValidStoredHotkey(keyCode: 37, modifiers: 0),
+              "stored: bare key is invalid")
+        check(!isValidStoredHotkey(keyCode: 37, modifiers: CarbonModifiers.shift),
+              "stored: shift-only chord is invalid")
+        check(!isValidStoredHotkey(keyCode: 37,
+                                   modifiers: CarbonModifiers.cmd | 0x40000),
+              "stored: unknown modifier bits are invalid")
     }
 
     static func labelTests() {

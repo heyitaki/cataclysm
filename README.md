@@ -8,6 +8,8 @@ The cursor fix is the capture technique virtual machines use: the hardware mouse
 
 ## Install
 
+Needs macOS 13 (Ventura) or later; works on both Apple silicon and Intel Macs.
+
 1. Download `Cataclysm-x.y.z.dmg` from the [releases page](https://github.com/heyitaki/cataclysm/releases) and open it.
 2. Drag `Cataclysm` onto the `Applications` shortcut next to it, then eject the image.
 3. Open Cataclysm from Applications. macOS will refuse the first launch with a malware warning, because the app is not notarized by Apple. That is expected:
@@ -17,6 +19,8 @@ The cursor fix is the capture technique virtual machines use: the hardware mouse
 4. Cataclysm asks for the Accessibility permission on first run and walks you through granting it. It needs Accessibility to see mouse events; nothing works until it's granted.
 
 Look for the Cataclysm icon in the menu bar. The dropdown has the on/off switches, the game picker, and a scroll speed slider; the rest is under Advanced.
+
+Press ⌥⌘L to toggle the cursor lock at any time, even while the game has focus. You can record a different shortcut under Advanced.
 
 ## If the cursor ever freezes
 
@@ -36,7 +40,7 @@ Open the dropdown, expand Advanced, and click "Reset everything and quit". That 
 
 ## Building from source
 
-Needs the Xcode command line tools. `make` builds `build/Cataclysm.app`; `make test` runs the tests; `make dmg VERSION=x.y.z` produces the installer image.
+Needs the Xcode command line tools. `make` builds `build/Cataclysm.app`; `make test` runs the tests; `make dmg VERSION=x.y.z` produces the installer image. `make release VERSION=x.y.z IDENTITY="Developer ID Application: <name> (<team>)" NOTARY_PROFILE=<profile>` builds, notarizes, and staples the DMG; it needs an Apple Developer ID, and without one releases ship straight from `make dmg`. For tuning, running the bundled binary with `--dump-scroll` logs each raw scroll event and the filter's decision to stdout.
 
 ## License
 

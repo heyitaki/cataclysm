@@ -12,17 +12,19 @@ import Foundation
 import ServiceManagement
 
 final class SmokeGate {
-    private let watcherLabel = "\(cataclysmBundleID).watch"
+    // Label, plist path, and executable path come from the shared derivations
+    // in Watcher.swift, so the gate validates exactly what the runtime uses.
+    private let watcherLabel = watcherJobLabel(bundleID: cataclysmBundleID)
     private let agent = SMAppService.agent(plistName: watcherPlistName)
     private let lockPath: String
     private let lock: InstanceLock
     private var legacyPlistURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/\(watcherLabel).plist")
+        legacyWatcherPlistLocation(
+            home: FileManager.default.homeDirectoryForCurrentUser,
+            bundleID: cataclysmBundleID)
     }
     private var executablePath: String {
-        Bundle.main.bundleURL
-            .appendingPathComponent("Contents/MacOS/cataclysm").path
+        watcherExecutable(inBundle: Bundle.main.bundleURL)
     }
 
     // Cleanup flags, flipped the moment each piece of state exists, so the
@@ -48,6 +50,15 @@ final class SmokeGate {
                    detail: "another instance holds \(lockPath)")
         else { return 1 }
         lockHeld = true
+        // The gate registers and unregisters the same agent the shipping app
+        // uses. A machine where an installed copy already registered the
+        // watcher is refused up front: proceeding would tear down the live
+        // registration on the cleanup path, breaking "leave no trace".
+        guard step("watcher not already registered", agent.status != .enabled,
+                   detail: "an installed Cataclysm's watcher is registered; "
+                       + "unregister it (Reset everything and quit, or "
+                       + "System Settings > Login Items) before running the gate")
+        else { return 1 }
         if smAppServicePath() {
             print("SMOKE PASS (SMAppService)")
             return 0
@@ -96,13 +107,12 @@ final class SmokeGate {
         var output = ""
         var resolved = false
         for _ in 0..<20 {
-            (printCode, output) = runLaunchctlCapture(
+            (printCode, output) = runLaunchctl(
                 ["print", "gui/\(getuid())/\(watcherLabel)"])
             if printCode == 0 {
-                resolved = launchctlOutputResolvesExecutable(
-                    output, executablePath: executablePath)
-                    || launchctlPid(inOutput: output)
-                        .map { processPath($0) == executablePath } ?? false
+                resolved = smokeResolution(output: output,
+                                           executablePath: executablePath,
+                                           pathForPid: processPath)
                 if resolved { break }
             }
             usleep(500_000)
@@ -136,7 +146,7 @@ final class SmokeGate {
                 at: legacyPlistURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true)
             // A definition launchd already holds would mask the fresh file.
-            _ = runLaunchctlCapture(["bootout", "gui/\(getuid())/\(watcherLabel)"])
+            runLaunchctl(["bootout", "gui/\(getuid())/\(watcherLabel)"])
             try data.write(to: legacyPlistURL)
             legacyPlistWritten = true
             _ = step("write legacy plist", true)
@@ -144,13 +154,13 @@ final class SmokeGate {
             return step("write legacy plist", false,
                         detail: error.localizedDescription)
         }
-        let (bootCode, bootOutput) = runLaunchctlCapture(
+        let (bootCode, bootOutput) = runLaunchctl(
             ["bootstrap", "gui/\(getuid())", legacyPlistURL.path])
         legacyBootstrapped = bootCode == 0
         guard step("bootstrap legacy job", bootCode == 0,
                    detail: "exit \(bootCode): \(firstLine(of: bootOutput))")
         else { return false }
-        let (code, output) = runLaunchctlCapture(
+        let (code, output) = runLaunchctl(
             ["print", "gui/\(getuid())/\(watcherLabel)"])
         guard step("launchctl print shows the legacy job", code == 0,
                    detail: "exit \(code): \(firstLine(of: output))")
@@ -161,7 +171,7 @@ final class SmokeGate {
                    detail: "expected \(executablePath); launchd has "
                        + programLines(of: output))
         else { return false }
-        let (outCode, outOutput) = runLaunchctlCapture(
+        let (outCode, outOutput) = runLaunchctl(
             ["bootout", "gui/\(getuid())/\(watcherLabel)"])
         legacyBootstrapped = outCode != 0
         guard step("bootout legacy job", outCode == 0,
@@ -201,7 +211,7 @@ final class SmokeGate {
 
     private func cleanupLegacy() {
         if legacyBootstrapped {
-            _ = runLaunchctlCapture(["bootout", "gui/\(getuid())/\(watcherLabel)"])
+            runLaunchctl(["bootout", "gui/\(getuid())/\(watcherLabel)"])
             legacyBootstrapped = false
         }
         if legacyPlistWritten {
@@ -225,21 +235,6 @@ final class SmokeGate {
             src.resume()
             signalSources.append(src) // a released source stops firing
         }
-    }
-
-    // MARK: - launchctl
-
-    private func runLaunchctlCapture(_ arguments: [String]) -> (Int32, String) {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        proc.arguments = arguments
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = pipe
-        do { try proc.run() } catch { return (-1, "") }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        proc.waitUntilExit()
-        return (proc.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
 
     // The true executable of a running process, from the kernel rather than

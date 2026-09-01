@@ -27,6 +27,8 @@ struct WatcherTests {
     static func main() {
         releaseTests()
         reregistrationTests()
+        registrationPlanTests()
+        derivationTests()
         legacyPlistTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
@@ -58,6 +60,39 @@ struct WatcherTests {
                 true, "version change needs re-registration")
         checkEq(needsWatcherReregistration(lastRegistered: "0.1.0", current: "0.1.0"),
                 false, "same version needs nothing")
+    }
+
+    static func registrationPlanTests() {
+        checkEq(watcherRegistrationPlan(statusEnabled: false, versionChanged: true),
+                WatcherRegistrationPlan(unregisterFirst: false, register: true),
+                "never registered: register without unregistering")
+        checkEq(watcherRegistrationPlan(statusEnabled: true, versionChanged: true),
+                WatcherRegistrationPlan(unregisterFirst: true, register: true),
+                "version change on an enabled agent: unregister then register")
+        checkEq(watcherRegistrationPlan(statusEnabled: true, versionChanged: false),
+                WatcherRegistrationPlan(unregisterFirst: false, register: false),
+                "same version, enabled: leave it alone")
+        checkEq(watcherRegistrationPlan(statusEnabled: false, versionChanged: false),
+                WatcherRegistrationPlan(unregisterFirst: false, register: true),
+                "same version but not enabled: register")
+    }
+
+    // The runtime and the smoke gate both consume these; a drift here would
+    // let the gate validate a different job than the app registers.
+    static func derivationTests() {
+        checkEq(watcherJobLabel(bundleID: "io.github.heyitaki.cataclysm"),
+                "io.github.heyitaki.cataclysm.watch",
+                "label derives from the bundle id")
+        checkEq(legacyWatcherPlistLocation(
+                    home: URL(fileURLWithPath: "/Users/friend"),
+                    bundleID: "io.github.heyitaki.cataclysm").path,
+                "/Users/friend/Library/LaunchAgents/"
+                    + "io.github.heyitaki.cataclysm.watch.plist",
+                "legacy plist lives in the user's LaunchAgents")
+        checkEq(watcherExecutable(
+                    inBundle: URL(fileURLWithPath: "/Applications/Cataclysm.app")),
+                "/Applications/Cataclysm.app/Contents/MacOS/cataclysm",
+                "executable path points inside the bundle")
     }
 
     static func legacyPlistTests() {

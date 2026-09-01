@@ -1,6 +1,6 @@
-// Jail geometry and engagement state: the rounded-rect clamp, AX window
-// measurement, and the engaged/virtual-position bookkeeping the tap callback
-// integrates against.
+// Jail engagement state and AX window measurement: the pure clamp geometry
+// lives in JailMath.swift; this file owns the AX reads and the
+// engaged/virtual-position bookkeeping the tap callback integrates against.
 
 import Cocoa
 
@@ -9,10 +9,6 @@ let inset: CGFloat = 1
 // several. Unbounded calls into a stalled game would freeze the cursor via
 // tap timeout.
 let axTimeout: Float = 0.05
-// Fallback title-bar inference: common windowed aspect ratios. The title bar
-// is the window height left over above the content. Ratio gaps exceed the
-// accepted band at any playable width, so at most one matches.
-let contentRatios: [CGFloat] = [9.0 / 16.0, 10.0 / 16.0, 3.0 / 4.0, 4.0 / 5.0]
 
 // Main-thread only: the tap source, timer, and notifications share the main
 // run loop. Moving any of them off it would need synchronization here.
@@ -27,53 +23,6 @@ var jailEnabled = true
 // so integration sees only hand movement, otherwise our own warps feed back
 // and the cursor rockets away.
 var pendingWarp = CGPoint.zero
-
-func clamp(_ v: CGFloat, _ lo: CGFloat, _ hi: CGFloat) -> CGFloat {
-    return min(max(v, lo), hi)
-}
-
-// Built once per frame refresh, so a radius can never describe a rect that has
-// moved on. The top arc is shrunk by the title bar the rect already excludes: a
-// circle that much smaller is internally tangent to the real one, so it can only
-// hold the cursor further inside the window.
-struct Clamp {
-    let rect: CGRect
-    let topRadius: CGFloat
-    let bottomRadius: CGFloat
-    init(rect: CGRect, titleBar: CGFloat) {
-        // half the shorter side is the largest radius the two arc centres fit in
-        let cap = min(rect.width, rect.height) / 2
-        self.rect = rect
-        self.topRadius = min(max(0, cornerRadius - titleBar), cap)
-        self.bottomRadius = min(cornerRadius, cap)
-    }
-
-    // A rect clamp holds the cursor in the frame but not in the window, and the
-    // difference is the four rounded corners: out there a click lands on the app
-    // behind, which drops the game out of focus and releases the jail.
-    func clamped(_ p: CGPoint) -> CGPoint {
-        let q = CGPoint(x: clamp(p.x, rect.minX, rect.maxX),
-                        y: clamp(p.y, rect.minY, rect.maxY))
-        let top = q.y < rect.midY
-        let radius = top ? topRadius : bottomRadius
-        guard radius > 0 else { return q }
-        let left = q.x < rect.midX
-        let cx = left ? rect.minX + radius : rect.maxX - radius
-        let cy = top ? rect.minY + radius : rect.maxY - radius
-        let dx = q.x - cx, dy = q.y - cy
-        // only the quadrant beyond both arc centres is corner, anywhere else the
-        // rect clamp already holds
-        guard left == (dx < 0), top == (dy < 0) else { return q }
-        let d = hypot(dx, dy)
-        guard d > radius else { return q }
-        // Whole points, because the delta fields the callback writes are
-        // integers. To nearest rather than inward: inward leaves nearly a point
-        // of step between a position just inside the arc and its projection just
-        // outside, so a hand crossing there twitches.
-        let s = radius / d
-        return CGPoint(x: (cx + dx * s).rounded(), y: (cy + dy * s).rounded())
-    }
-}
 
 func axElement(_ parent: AXUIElement, _ attribute: String) -> AXUIElement? {
     var ref: CFTypeRef?
@@ -95,24 +44,11 @@ func axRect(_ el: AXUIElement) -> CGRect? {
     return CGRect(origin: pos, size: size)
 }
 
-// The title bar must be excluded from the clamp or click-flicks drag the
-// window and ratchet the cursor out the top. Measure it from the close
-// button, which sits vertically centered in the title bar. No close button
-// means borderless or fullscreen. The ratio table covers windows that hide
-// their standard controls.
+// AX half of the title-bar measurement; the inference rules live with the
+// rest of the pure geometry in JailMath.swift.
 func titleBarHeight(_ winEl: AXUIElement, frame: CGRect) -> CGFloat {
-    if let btn = axElement(winEl, kAXCloseButtonAttribute),
-       let btnRect = axRect(btn) {
-        let tb = btnRect.height + (btnRect.minY - frame.minY) * 2
-        // a bar taller than its own window means a bad AX read, fall through
-        if tb > 0 && tb < 80 && tb < frame.height { return tb }
-    }
-    for ratio in contentRatios {
-        // 16..45 points spans the standard macOS title-bar heights
-        let tb = frame.height - frame.width * ratio
-        if tb >= 16 && tb <= 45 { return tb }
-    }
-    return 0
+    let closeButton = axElement(winEl, kAXCloseButtonAttribute).flatMap(axRect)
+    return inferredTitleBarHeight(closeButton: closeButton, frame: frame)
 }
 
 func gameClamp(_ app: NSRunningApplication) -> Clamp? {
@@ -129,7 +65,7 @@ func gameClamp(_ app: NSRunningApplication) -> Clamp? {
     // infinite origin turns virtualPos into NaN permanently: NaN never compares
     // equal, so every later re-clamp warps again. Keep the last known rect.
     guard !inner.isEmpty else { return nil }
-    return Clamp(rect: inner, titleBar: titleBar)
+    return Clamp(rect: inner, titleBar: titleBar, cornerRadius: cornerRadius)
 }
 
 func setEngaged(_ on: Bool) {

@@ -25,6 +25,57 @@ func needsWatcherReregistration(lastRegistered: String?, current: String) -> Boo
     lastRegistered != current
 }
 
+// What registerWatcher must do, decided from one status snapshot: an enabled
+// agent on a version change is unregistered first (SMAppService may not
+// launch an agent whose executable changed otherwise), and registration runs
+// unless the same version is already enabled. Pure so the sequencing that
+// crash recovery depends on is pinned by tests.
+struct WatcherRegistrationPlan: Equatable {
+    let unregisterFirst: Bool
+    let register: Bool
+}
+
+func watcherRegistrationPlan(statusEnabled: Bool,
+                             versionChanged: Bool) -> WatcherRegistrationPlan {
+    WatcherRegistrationPlan(unregisterFirst: statusEnabled && versionChanged,
+                            register: !statusEnabled || versionChanged)
+}
+
+// MARK: - Shared job derivations
+
+// Used by both the app runtime and the smoke gate, so the gate always
+// validates exactly the label, plist path, and executable path the runtime
+// will register. Parameterized (no Bundle or FileManager reads) so the test
+// harness can pin the derivations.
+func watcherJobLabel(bundleID: String) -> String {
+    "\(bundleID).watch"
+}
+
+func legacyWatcherPlistLocation(home: URL, bundleID: String) -> URL {
+    home.appendingPathComponent(
+        "Library/LaunchAgents/\(watcherJobLabel(bundleID: bundleID)).plist")
+}
+
+func watcherExecutable(inBundle bundleURL: URL) -> String {
+    bundleURL.appendingPathComponent("Contents/MacOS/cataclysm").path
+}
+
+// The one launchctl runner. Callers that only branch on the exit code drop
+// the output; the smoke gate reports it in FAIL details.
+@discardableResult
+func runLaunchctl(_ arguments: [String]) -> (code: Int32, output: String) {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    proc.arguments = arguments
+    let pipe = Pipe()
+    proc.standardOutput = pipe
+    proc.standardError = pipe
+    do { try proc.run() } catch { return (-1, "") }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    proc.waitUntilExit()
+    return (proc.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+}
+
 // The legacy job's plist. Two deliberate differences from the bundled
 // SMAppService plist: ProgramArguments carries an absolute executable path
 // (BundleProgram is only supported for plists installed through SMAppService),
