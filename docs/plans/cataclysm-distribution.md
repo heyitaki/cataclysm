@@ -49,33 +49,33 @@ Traps already paid for, do not rediscover:
 
 ### Task 1: Split main.swift into modules
 
-- [x] Move the clamp geometry and jail math into `Jail.swift` and tap creation/lifecycle into `TapHost.swift`; `main.swift` keeps argument parsing, wiring, and the run loop. Code moves verbatim except access-level and file-scope adjustments; same flags, same output, binary still `mousejail`.
-- [x] Makefile `$(BINARY)` rule gets the explicit source list `main.swift Jail.swift TapHost.swift` and matching prerequisites.
-- [x] `make` and `make test` exit 0; the diff reads as moved code, not rewritten logic.
+- [ ] Move the clamp geometry and jail math into `Jail.swift` and tap creation/lifecycle into `TapHost.swift`; `main.swift` keeps argument parsing, wiring, and the run loop. Code moves verbatim except access-level and file-scope adjustments; same flags, same output, binary still `mousejail`.
+- [ ] Makefile `$(BINARY)` rule gets the explicit source list `main.swift Jail.swift TapHost.swift` and matching prerequisites.
+- [ ] `make` and `make test` exit 0; the diff reads as moved code, not rewritten logic.
 
 ### Task 2: Wire pointer acceleration into the CLI
 
-- [x] Read `specs/pointer-and-scroll.md` phase 1. Wire `PointerAccel` into `main.swift` behind the flag that spec names (its choice wins; `--no-accel` only if it names none), default off. Include the 5s reassert timer and `didWakeNotification` reassert via the module API, and the null-client read round-trip check before reporting the feature active. (Spec names no CLI flag, so the flag is `--no-accel`; the round-trip check is a new `clientResponsive` probe on `PointerAccel`.)
-- [x] Every exit path (signal handlers, clean exit) calls `restore()` before the process dies.
-- [x] Build gains `-import-objc-header Bridging.h` and `PointerAccel.swift` with prerequisites updated in the same edit; `make` and `make test` exit 0; also verify both `xcrun swiftc -typecheck -target arm64-apple-macos13.0` and `-target x86_64-apple-macos13.0` pass on the CLI source list. Never run the binary.
+- [ ] Read `specs/pointer-and-scroll.md` phase 1. Wire `PointerAccel` into `main.swift` behind the flag that spec names (its choice wins; `--no-accel` only if it names none), default off. Include the 5s reassert timer and `didWakeNotification` reassert via the module API, and the null-client read round-trip check before reporting the feature active.
+- [ ] Every exit path (signal handlers, clean exit) calls `restore()` before the process dies.
+- [ ] Build gains `-import-objc-header Bridging.h` and `PointerAccel.swift` with prerequisites updated in the same edit; `make` and `make test` exit 0; also verify both `xcrun swiftc -typecheck -target arm64-apple-macos13.0` and `-target x86_64-apple-macos13.0` pass on the CLI source list. Never run the binary.
 
 ### Task 3: Wire the scroll filter tap into the CLI
 
-- [x] Read `specs/pointer-and-scroll.md` phase 2. Add a separate `.tailAppendEventTap` for `scrollWheel` dispatching to `decideScrollEvent` before any jail code runs, honoring the Context traps (seconds conversion, nil-return swallow, long-lived state, per-axis flatten pairing, field accessor types). (Tap lives in `TapHost.swift`; disjoint masks keep wheel events out of the jail callback entirely.)
-- [x] CLI flags for invert vertical, invert horizontal, flatten, lines per notch, multiplier, and alternate trackpad detection (default off), clamped through the existing clamp helpers; `--dump-scroll` prints each raw event's fields and the decision to stdout. (Flags: `--scroll --no-invert-vertical --invert-horizontal --no-flatten --lines --multiplier --alt-trackpad --dump-scroll`; any of them enables the scroll tap, defaults match the spec.)
-- [x] `make` and `make test` exit 0; both `-target` typechecks pass. Never run the binary.
+- [ ] Read `specs/pointer-and-scroll.md` phase 2. Add a separate `.tailAppendEventTap` for `scrollWheel` dispatching to `decideScrollEvent` before any jail code runs, honoring the Context traps (seconds conversion, nil-return swallow, long-lived state, per-axis flatten pairing, field accessor types).
+- [ ] CLI flags for invert vertical, invert horizontal, flatten, lines per notch, multiplier, and alternate trackpad detection (default off), clamped through the existing clamp helpers; `--dump-scroll` prints each raw event's fields and the decision to stdout.
+- [ ] `make` and `make test` exit 0; both `-target` typechecks pass. Never run the binary.
 
 ### Task 4: Settings store with clamped load
 
-- [x] `Settings.swift`: a `UserDefaults`-backed store with every key the panel needs (jail enabled, target bundle id and display name, acceleration off, invert vertical, invert horizontal, flatten, lines per notch, multiplier, alternate detection, hotkey chord, corner radius, launch-at-login, last-registered version) with spec defaults, clamping on load per the spec bounds (multiplier 0.001-100, lines 1-1000, radius 0-200), unknown keys untouched, unparseable values falling back to defaults. (Multiplier stored as `mulThousandths`; hotkey chord as raw Carbon keyCode+modifiers ints; launch-at-login defaults true per the spec's dropdown sketch; reads clamp without rewriting storage.)
-- [x] `recovery.`-prefixed keys segregated per the Context rules, plus the one-time migration read of `recovery.originalMouseAcceleration` from the old `mousejail` process-name domain. (One-time is enforced by a `recovery.migratedFromMousejail` marker, itself recovery-prefixed so reset-to-defaults cannot re-trigger a stale import; -1 and non-integer legacy values never migrate.)
-- [x] A `build/settings-tests` harness in the existing test-harness pattern covering defaults, each clamp bound, reset-to-defaults sparing `recovery.` keys, and the migration read (point the store at a scratch `UserDefaults(suiteName:)`, never `.standard`, in tests); `make test` runs both harnesses and exits 0. (66 + 55 checks green; both macOS 13 `-target` typechecks pass on Settings.swift.)
+- [ ] `Settings.swift`: a `UserDefaults`-backed store with every key the panel needs (jail enabled, target bundle id and display name, acceleration off, invert vertical, invert horizontal, flatten, lines per notch, multiplier, alternate detection, hotkey chord, corner radius, launch-at-login, last-registered version) with spec defaults, clamping on load per the spec bounds (multiplier 0.001-100, lines 1-1000, radius 0-200), unknown keys untouched, unparseable values falling back to defaults.
+- [ ] `recovery.`-prefixed keys segregated per the Context rules, plus the one-time migration read of `recovery.originalMouseAcceleration` from the old `mousejail` process-name domain.
+- [ ] A `build/settings-tests` harness in the existing test-harness pattern covering defaults, each clamp bound, reset-to-defaults sparing `recovery.` keys, and the migration read (point the store at a scratch `UserDefaults(suiteName:)`, never `.standard`, in tests); `make test` runs both harnesses and exits 0.
 
 ### Task 5: App bundle, placeholder icon, signing
 
-- [x] App entry per Context (arg dispatch, then SwiftUI) with a minimal `MenuBarExtra("Cataclysm").menuBarExtraStyle(.window)` placeholder panel; explicit source list sharing `Jail.swift`, `TapHost.swift`, `PointerAccel.swift`, `ScrollFilter.swift`, `Settings.swift`; `--watch` and `--smoke-register` exist as stubs that print and exit 0. (`CataclysmApp.swift` also carries the spec-default globals and `fail` the shared modules read from `main.swift` in the CLI target; Task 11 folds that wiring together.)
-- [x] `make app` assembles `build/Cataclysm.app`: `Info.plist` with `LSUIElement` true, `LSMinimumSystemVersion` 13.0, `CFBundleIdentifier io.github.heyitaki.cataclysm`, version from a `VERSION` Makefile variable; `Contents/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` exactly per the spec's watcher-plist block (`BundleProgram`, `KeepAlive` `{SuccessfulExit = false}`, `AssociatedBundleIdentifiers`); generated placeholder icns in `Contents/Resources`. (Plist templates under `packaging/`, icon drawn by `packaging/IconGen.swift`, ten-slice `iconutil` set with the `sips` fallback per the Context trap.)
-- [x] Sign with `IDENTITY ?= Cataclysm`; `codesign --verify --strict build/Cataclysm.app` exits 0; `plutil -lint` passes on both plists; `make` and `make test` still exit 0. (All green; the `app` rule runs both lints and the strict verify itself.)
+- [ ] App entry per Context (arg dispatch, then SwiftUI) with a minimal `MenuBarExtra("Cataclysm").menuBarExtraStyle(.window)` placeholder panel; explicit source list sharing `Jail.swift`, `TapHost.swift`, `PointerAccel.swift`, `ScrollFilter.swift`, `Settings.swift`; `--watch` and `--smoke-register` exist as stubs that print and exit 0.
+- [ ] `make app` assembles `build/Cataclysm.app`: `Info.plist` with `LSUIElement` true, `LSMinimumSystemVersion` 13.0, `CFBundleIdentifier io.github.heyitaki.cataclysm`, version from a `VERSION` Makefile variable; `Contents/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` exactly per the spec's watcher-plist block (`BundleProgram`, `KeepAlive` `{SuccessfulExit = false}`, `AssociatedBundleIdentifiers`); generated placeholder icns in `Contents/Resources`.
+- [ ] Sign with `IDENTITY ?= Cataclysm`; `codesign --verify --strict build/Cataclysm.app` exits 0; `plutil -lint` passes on both plists; `make` and `make test` still exit 0.
 
 ### Task 6: Startup order and onboarding
 
