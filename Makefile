@@ -13,7 +13,7 @@ APP = build/Cataclysm.app
 
 # Explicit source list: a *.swift glob breaks once a second entry point exists.
 CLI_SOURCES = main.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift
-APP_SOURCES = CataclysmApp.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift
+APP_SOURCES = CataclysmApp.swift Startup.swift Jail.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift
 
 $(BINARY): $(CLI_SOURCES) Bridging.h
 	xcrun swiftc -O -import-objc-header Bridging.h $(CLI_SOURCES) -o $(BINARY)
@@ -93,9 +93,10 @@ restart: install
 	done; \
 	echo "helper did not restart; press cmd+alt+L twice"; exit 1
 
-test: build/scrollfilter-tests build/settings-tests
+test: build/scrollfilter-tests build/settings-tests build/startup-tests
 	./build/scrollfilter-tests
 	./build/settings-tests
+	./build/startup-tests
 
 build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
 	mkdir -p build
@@ -105,6 +106,10 @@ build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
 build/settings-tests: Settings.swift ScrollFilter.swift tests/SettingsTests.swift
 	mkdir -p build
 	xcrun swiftc -O Settings.swift ScrollFilter.swift tests/SettingsTests.swift -o $@
+
+build/startup-tests: Startup.swift tests/StartupTests.swift
+	mkdir -p build
+	xcrun swiftc -O Startup.swift tests/StartupTests.swift -o $@
 
 clean:
 	rm -f $(BINARY)

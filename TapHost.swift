@@ -46,14 +46,28 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     return Unmanaged.passUnretained(event)
 }
 
-func startTap() {
+// Returns whether the tap came up. The CLI treats false as fatal; the app
+// keeps running and shows the feature as unavailable (a lost or missing
+// Accessibility grant is the common cause and is recoverable).
+func startTap() -> Bool {
     tap = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap,
                             options: .defaultTap, eventsOfInterest: mask,
                             callback: callback, userInfo: nil)
-    guard let tapPort = tap else { fail("could not create event tap") }
+    guard let tapPort = tap else { return false }
     let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tapPort, 0)
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
     CGEvent.tapEnable(tap: tapPort, enable: true)
+    return true
+}
+
+// Invalidating the mach port also invalidates its run loop source, so the
+// callback can never fire again on a revoked grant.
+func stopTap() {
+    if let t = tap {
+        CGEvent.tapEnable(tap: t, enable: false)
+        CFMachPortInvalidate(t)
+    }
+    tap = nil
 }
 
 // Scroll filter tap (spec phase 2). Its own tail-append tap on scrollWheel
@@ -160,14 +174,23 @@ private func decisionDescription(_ decision: ScrollDecision) -> String {
     }
 }
 
-func startScrollTap() {
+func startScrollTap() -> Bool {
     scrollTap = CGEvent.tapCreate(tap: .cghidEventTap, place: .tailAppendEventTap,
                                   options: .defaultTap, eventsOfInterest: scrollMask,
                                   callback: scrollCallback, userInfo: nil)
-    guard let tapPort = scrollTap else { fail("could not create scroll event tap") }
+    guard let tapPort = scrollTap else { return false }
     let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tapPort, 0)
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
     CGEvent.tapEnable(tap: tapPort, enable: true)
+    return true
+}
+
+func stopScrollTap() {
+    if let t = scrollTap {
+        CGEvent.tapEnable(tap: t, enable: false)
+        CFMachPortInvalidate(t)
+    }
+    scrollTap = nil
 }
 
 // Same self-heal refresh() gives the jail tap: macOS disables taps under load

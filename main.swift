@@ -174,8 +174,8 @@ if noAccel {
     pointerAccel = accel
 }
 
-startTap()
-if scrollEnabled { startScrollTap() }
+if !startTap() { fail("could not create event tap") }
+if scrollEnabled, !startScrollTap() { fail("could not create scroll event tap") }
 
 // The notification makes focus changes immediate, the timer covers geometry
 // changes and is the self-heal cadence for both taps.

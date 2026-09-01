@@ -49,39 +49,39 @@ Traps already paid for, do not rediscover:
 
 ### Task 1: Split main.swift into modules
 
-- [ ] Move the clamp geometry and jail math into `Jail.swift` and tap creation/lifecycle into `TapHost.swift`; `main.swift` keeps argument parsing, wiring, and the run loop. Code moves verbatim except access-level and file-scope adjustments; same flags, same output, binary still `mousejail`.
-- [ ] Makefile `$(BINARY)` rule gets the explicit source list `main.swift Jail.swift TapHost.swift` and matching prerequisites.
-- [ ] `make` and `make test` exit 0; the diff reads as moved code, not rewritten logic.
+- [x] Move the clamp geometry and jail math into `Jail.swift` and tap creation/lifecycle into `TapHost.swift`; `main.swift` keeps argument parsing, wiring, and the run loop. Code moves verbatim except access-level and file-scope adjustments; same flags, same output, binary still `mousejail`.
+- [x] Makefile `$(BINARY)` rule gets the explicit source list `main.swift Jail.swift TapHost.swift` and matching prerequisites.
+- [x] `make` and `make test` exit 0; the diff reads as moved code, not rewritten logic.
 
 ### Task 2: Wire pointer acceleration into the CLI
 
-- [ ] Read `specs/pointer-and-scroll.md` phase 1. Wire `PointerAccel` into `main.swift` behind the flag that spec names (its choice wins; `--no-accel` only if it names none), default off. Include the 5s reassert timer and `didWakeNotification` reassert via the module API, and the null-client read round-trip check before reporting the feature active.
-- [ ] Every exit path (signal handlers, clean exit) calls `restore()` before the process dies.
-- [ ] Build gains `-import-objc-header Bridging.h` and `PointerAccel.swift` with prerequisites updated in the same edit; `make` and `make test` exit 0; also verify both `xcrun swiftc -typecheck -target arm64-apple-macos13.0` and `-target x86_64-apple-macos13.0` pass on the CLI source list. Never run the binary.
+- [x] Read `specs/pointer-and-scroll.md` phase 1. Wire `PointerAccel` into `main.swift` behind the flag that spec names (its choice wins; `--no-accel` only if it names none), default off. Include the 5s reassert timer and `didWakeNotification` reassert via the module API, and the null-client read round-trip check before reporting the feature active.
+- [x] Every exit path (signal handlers, clean exit) calls `restore()` before the process dies.
+- [x] Build gains `-import-objc-header Bridging.h` and `PointerAccel.swift` with prerequisites updated in the same edit; `make` and `make test` exit 0; also verify both `xcrun swiftc -typecheck -target arm64-apple-macos13.0` and `-target x86_64-apple-macos13.0` pass on the CLI source list. Never run the binary.
 
 ### Task 3: Wire the scroll filter tap into the CLI
 
-- [ ] Read `specs/pointer-and-scroll.md` phase 2. Add a separate `.tailAppendEventTap` for `scrollWheel` dispatching to `decideScrollEvent` before any jail code runs, honoring the Context traps (seconds conversion, nil-return swallow, long-lived state, per-axis flatten pairing, field accessor types).
-- [ ] CLI flags for invert vertical, invert horizontal, flatten, lines per notch, multiplier, and alternate trackpad detection (default off), clamped through the existing clamp helpers; `--dump-scroll` prints each raw event's fields and the decision to stdout.
-- [ ] `make` and `make test` exit 0; both `-target` typechecks pass. Never run the binary.
+- [x] Read `specs/pointer-and-scroll.md` phase 2. Add a separate `.tailAppendEventTap` for `scrollWheel` dispatching to `decideScrollEvent` before any jail code runs, honoring the Context traps (seconds conversion, nil-return swallow, long-lived state, per-axis flatten pairing, field accessor types).
+- [x] CLI flags for invert vertical, invert horizontal, flatten, lines per notch, multiplier, and alternate trackpad detection (default off), clamped through the existing clamp helpers; `--dump-scroll` prints each raw event's fields and the decision to stdout.
+- [x] `make` and `make test` exit 0; both `-target` typechecks pass. Never run the binary.
 
 ### Task 4: Settings store with clamped load
 
-- [ ] `Settings.swift`: a `UserDefaults`-backed store with every key the panel needs (jail enabled, target bundle id and display name, acceleration off, invert vertical, invert horizontal, flatten, lines per notch, multiplier, alternate detection, hotkey chord, corner radius, launch-at-login, last-registered version) with spec defaults, clamping on load per the spec bounds (multiplier 0.001-100, lines 1-1000, radius 0-200), unknown keys untouched, unparseable values falling back to defaults.
-- [ ] `recovery.`-prefixed keys segregated per the Context rules, plus the one-time migration read of `recovery.originalMouseAcceleration` from the old `mousejail` process-name domain.
-- [ ] A `build/settings-tests` harness in the existing test-harness pattern covering defaults, each clamp bound, reset-to-defaults sparing `recovery.` keys, and the migration read (point the store at a scratch `UserDefaults(suiteName:)`, never `.standard`, in tests); `make test` runs both harnesses and exits 0.
+- [x] `Settings.swift`: a `UserDefaults`-backed store with every key the panel needs (jail enabled, target bundle id and display name, acceleration off, invert vertical, invert horizontal, flatten, lines per notch, multiplier, alternate detection, hotkey chord, corner radius, launch-at-login, last-registered version) with spec defaults, clamping on load per the spec bounds (multiplier 0.001-100, lines 1-1000, radius 0-200), unknown keys untouched, unparseable values falling back to defaults.
+- [x] `recovery.`-prefixed keys segregated per the Context rules, plus the one-time migration read of `recovery.originalMouseAcceleration` from the old `mousejail` process-name domain.
+- [x] A `build/settings-tests` harness in the existing test-harness pattern covering defaults, each clamp bound, reset-to-defaults sparing `recovery.` keys, and the migration read (point the store at a scratch `UserDefaults(suiteName:)`, never `.standard`, in tests); `make test` runs both harnesses and exits 0.
 
 ### Task 5: App bundle, placeholder icon, signing
 
-- [ ] App entry per Context (arg dispatch, then SwiftUI) with a minimal `MenuBarExtra("Cataclysm").menuBarExtraStyle(.window)` placeholder panel; explicit source list sharing `Jail.swift`, `TapHost.swift`, `PointerAccel.swift`, `ScrollFilter.swift`, `Settings.swift`; `--watch` and `--smoke-register` exist as stubs that print and exit 0.
-- [ ] `make app` assembles `build/Cataclysm.app`: `Info.plist` with `LSUIElement` true, `LSMinimumSystemVersion` 13.0, `CFBundleIdentifier io.github.heyitaki.cataclysm`, version from a `VERSION` Makefile variable; `Contents/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` exactly per the spec's watcher-plist block (`BundleProgram`, `KeepAlive` `{SuccessfulExit = false}`, `AssociatedBundleIdentifiers`); generated placeholder icns in `Contents/Resources`.
-- [ ] Sign with `IDENTITY ?= Cataclysm`; `codesign --verify --strict build/Cataclysm.app` exits 0; `plutil -lint` passes on both plists; `make` and `make test` still exit 0.
+- [x] App entry per Context (arg dispatch, then SwiftUI) with a minimal `MenuBarExtra("Cataclysm").menuBarExtraStyle(.window)` placeholder panel; explicit source list sharing `Jail.swift`, `TapHost.swift`, `PointerAccel.swift`, `ScrollFilter.swift`, `Settings.swift`; `--watch` and `--smoke-register` exist as stubs that print and exit 0.
+- [x] `make app` assembles `build/Cataclysm.app`: `Info.plist` with `LSUIElement` true, `LSMinimumSystemVersion` 13.0, `CFBundleIdentifier io.github.heyitaki.cataclysm`, version from a `VERSION` Makefile variable; `Contents/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` exactly per the spec's watcher-plist block (`BundleProgram`, `KeepAlive` `{SuccessfulExit = false}`, `AssociatedBundleIdentifiers`); generated placeholder icns in `Contents/Resources`.
+- [x] Sign with `IDENTITY ?= Cataclysm`; `codesign --verify --strict build/Cataclysm.app` exits 0; `plutil -lint` passes on both plists; `make` and `make test` still exit 0.
 
 ### Task 6: Startup order and onboarding
 
-- [ ] Read the spec's "First run" section. Implement the six startup steps in order: flock instance lock on `~/Library/Application Support/io.github.heyitaki.cataclysm/instance.lock` (loser shows a one-line notice, exits 0, touches nothing), `CGAssociateMouseAndMouseCursorPosition(1)`, the `/Volumes/`-or-translocation install gate with its move-to-Applications screen, clamped settings load, `AXIsProcessTrusted()` check (never the prompting variant here), then taps, acceleration property, and agent registration only after trust.
-- [ ] Onboarding window per spec: explanation, primary button calling the prompting trust check, secondary button opening the Accessibility deep link, 0.5s trust poll, Relaunch fallback button; never shown while granted; agent registration deferred until onboarding completes.
-- [ ] Ungranted or lost-grant state: cursor re-associated, both taps down, features shown unavailable; the app keeps running and polls, never exits. `make app` and `make test` exit 0.
+- [x] Read the spec's "First run" section. Implement the six startup steps in order: flock instance lock on `~/Library/Application Support/io.github.heyitaki.cataclysm/instance.lock` (loser shows a one-line notice, exits 0, touches nothing), `CGAssociateMouseAndMouseCursorPosition(1)`, the `/Volumes/`-or-translocation install gate with its move-to-Applications screen, clamped settings load, `AXIsProcessTrusted()` check (never the prompting variant here), then taps, acceleration property, and agent registration only after trust.
+- [x] Onboarding window per spec: explanation, primary button calling the prompting trust check, secondary button opening the Accessibility deep link, 0.5s trust poll, Relaunch fallback button; never shown while granted; agent registration deferred until onboarding completes.
+- [x] Ungranted or lost-grant state: cursor re-associated, both taps down, features shown unavailable; the app keeps running and polls, never exits. `make app` and `make test` exit 0.
 
 ### Task 7: Panel default view and status rows
 
