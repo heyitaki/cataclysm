@@ -1,0 +1,25 @@
+name = "cataclysm"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+workers_dev = false
+account_id = "9bdc7b059bbd6f7e6204d2d23e03e025"
+
+# The pattern needs the wildcard: Cloudflare matches a route against the whole
+# URL including the query string, so a bare /cataclysm/download would miss
+# /cataclysm/download?src=page. The wildcard also catches sibling paths the
+# Worker does not own, which src/index.js forwards to the origin untouched.
+[[routes]]
+pattern = "akshath.me/cataclysm/*"
+zone_name = "akshath.me"
+
+[vars]
+# Server-side kill switch for /cataclysm/ping. Does not affect /download.
+PING_ENABLED = "true"
+
+[[analytics_engine_datasets]]
+binding = "DOWNLOADS"
+dataset = "cataclysm_downloads"
+
+[[analytics_engine_datasets]]
+binding = "PINGS"
+dataset = "cataclysm_pings"
