@@ -17,6 +17,8 @@ import Foundation
 final class Telemetry {
     static let endpoint = URL(string: "https://akshath.me/cataclysm/ping")!
     static let minimumInterval: TimeInterval = 20 * 60 * 60
+    // How often the app re-checks eligibility after the launch-time tick.
+    static let tickInterval: TimeInterval = 60 * 60
     static let requestTimeout: TimeInterval = 10
 
     #if arch(arm64)
@@ -35,11 +37,10 @@ final class Telemetry {
     private let version: String
     private let macOSVersion: String
 
-    init(settings: Settings, appVersion: String,
-         macOSVersion: String = Telemetry.hostMacOSVersion) {
+    init(settings: Settings, appVersion: String) {
         self.settings = settings
         self.version = dottedInteger(appVersion)
-        self.macOSVersion = dottedInteger(macOSVersion)
+        self.macOSVersion = dottedInteger(Telemetry.hostMacOSVersion)
     }
 
     // MARK: - Identity
@@ -48,17 +49,15 @@ final class Telemetry {
     // rides along on every heartbeat so cohort retention survives Analytics
     // Engine's 90-day window: without it an install whose first ping aged
     // out is indistinguishable from a new one. Both are bookkeeping, spared
-    // by resetToDefaults(). A created date lost on its own is re-minted
-    // under the existing id, so the Mac keeps counting as one install.
+    // by resetToDefaults(). Each value missing on its own is re-minted
+    // without touching the other: a lost created date keeps the id, so the
+    // Mac still counts as one install; a lost id keeps the date, so the new
+    // id lands in the cohort the install actually belongs to.
     func identity(now: Date) -> (installID: String, created: String) {
         let installID = settings.telemetryInstallID ?? UUID().uuidString.lowercased()
         let created = settings.telemetryInstallCreated ?? Telemetry.dayString(now)
-        if settings.telemetryInstallID != installID {
-            settings.telemetryInstallID = installID
-        }
-        if settings.telemetryInstallCreated != created {
-            settings.telemetryInstallCreated = created
-        }
+        settings.telemetryInstallID = installID
+        settings.telemetryInstallCreated = created
         return (installID, created)
     }
 

@@ -145,7 +145,7 @@ export function jsonResponse(body, status = 200) {
  * way the runtime attaches it.
  *
  * @param {string} url
- * @param {{ method?: string, headers?: Record<string, string>, body?: string, country?: string }} [init]
+ * @param {{ method?: string, headers?: Record<string, string>, body?: string | ReadableStream, duplex?: "half", country?: string }} [init]
  */
 export function makeRequest(url, init = {}) {
   const { country, ...rest } = init;

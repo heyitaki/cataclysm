@@ -105,11 +105,15 @@ final class Settings {
         return value
     }
 
-    private func finiteDouble(_ key: String, or fallback: Double) -> Double {
+    private func finiteDoubleOptional(_ key: String) -> Double? {
         guard let number = defaults.object(forKey: key) as? NSNumber,
               CFGetTypeID(number) != CFBooleanGetTypeID(),
-              let value = number as? Double, value.isFinite else { return fallback }
+              let value = number as? Double, value.isFinite else { return nil }
         return value
+    }
+
+    private func finiteDouble(_ key: String, or fallback: Double) -> Double {
+        finiteDoubleOptional(key) ?? fallback
     }
 
     private func nonEmptyOptional(_ key: String) -> String? {
@@ -258,10 +262,7 @@ final class Settings {
 
     // Epoch seconds of the last ping attempt; a wrong type reads as never.
     var telemetryLastAttempt: Double? {
-        get {
-            let value = finiteDouble(Key.telemetryLastAttempt, or: .nan)
-            return value.isFinite ? value : nil
-        }
+        get { finiteDoubleOptional(Key.telemetryLastAttempt) }
         set { setOrRemove(newValue, forKey: Key.telemetryLastAttempt) }
     }
 

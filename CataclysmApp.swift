@@ -249,9 +249,9 @@ final class AppRuntime {
         // the timer nor the immediate tick below exists in those processes.
         // Each tick re-reads the switch, so turning it off cancels nothing in
         // flight and simply leaves the next tick ineligible.
-        let heartbeat = Telemetry(settings: loaded, appVersion: appVersion())
-        telemetry = heartbeat
-        telemetryTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) {
+        telemetry = Telemetry(settings: loaded, appVersion: appVersion())
+        telemetryTimer = Timer.scheduledTimer(withTimeInterval: Telemetry.tickInterval,
+                                              repeats: true) {
             [weak self] _ in self?.telemetryTick()
         }
         // Deferred like the feature start above so the first send follows the

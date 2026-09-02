@@ -129,6 +129,17 @@ struct TelemetryTests {
         let repaired = t.identity(now: utc(2026, 10, 1, 12))
         checkEq(repaired.installID, first.installID, "identity: id kept when created missing")
         checkEq(repaired.created, "2026-10-01", "identity: created re-minted")
+
+        // The mirror case: an id lost with its created date kept mints a
+        // fresh id under that date, so the new id joins the cohort the
+        // install actually belongs to instead of today's.
+        s.telemetryInstallID = nil
+        let reminted = t.identity(now: utc(2026, 11, 5, 12))
+        check(matches(reminted.installID, uuidPattern), "identity: fresh id is a uuid",
+              reminted.installID)
+        check(reminted.installID != first.installID, "identity: fresh id when id missing")
+        checkEq(reminted.created, "2026-10-01", "identity: created kept when id missing")
+        checkEq(s.telemetryInstallID, reminted.installID, "identity: fresh id persisted")
     }
 
     static func eligibilityTests() {

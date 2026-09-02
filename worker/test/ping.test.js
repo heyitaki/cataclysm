@@ -110,13 +110,87 @@ describe("/cataclysm/ping", () => {
     expect(env.PINGS.rows).toEqual([]);
   });
 
-  it("accepts a body just under the cap", async () => {
+  it("accepts a body of exactly 1024 bytes", async () => {
     const body = JSON.stringify(ping());
     const padded = " ".repeat(1024 - body.length) + body;
     const response = await handler()(pingRequest(padded), makeEnv());
 
     expect(padded.length).toBe(1024);
     expect(response.status).toBe(204);
+  });
+
+  it("rejects a body of 1025 bytes", async () => {
+    const env = makeEnv();
+    const body = JSON.stringify(ping());
+    const padded = " ".repeat(1025 - body.length) + body;
+    const response = await handler()(pingRequest(padded), env);
+
+    expect(padded.length).toBe(1025);
+    expect(response.status).toBe(400);
+    expect(env.PINGS.rows).toEqual([]);
+  });
+
+  it("rejects a declared length over the cap before the body is read", async () => {
+    const env = makeEnv();
+    // The body itself is a valid heartbeat, so only the header can reject it.
+    const response = await handler()(
+      makeRequest(PING_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": "5000" },
+        body: JSON.stringify(ping()),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(env.PINGS.rows).toEqual([]);
+  });
+
+  it("assembles a body that arrives in several chunks", async () => {
+    const env = makeEnv();
+    const text = JSON.stringify(ping());
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(text.slice(0, 20)));
+        controller.enqueue(encoder.encode(text.slice(20)));
+        controller.close();
+      },
+    });
+    const response = await handler()(
+      makeRequest(PING_URL, { method: "POST", body: stream, duplex: "half" }),
+      env,
+    );
+
+    expect(response.status).toBe(204);
+    expect(env.PINGS.rows).toHaveLength(1);
+  });
+
+  it("abandons an unlabelled stream the moment it passes the cap", async () => {
+    const env = makeEnv();
+    let pulls = 0;
+    let cancelled = false;
+    // Endless whitespace: valid JSON padding, never a document, never done.
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(600).fill(0x20));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = await handler()(
+      makeRequest(PING_URL, { method: "POST", body: stream, duplex: "half" }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(cancelled).toBe(true);
+    // Two chunks cross 1024 bytes; a reader that buffered on would still be
+    // pulling, and pull-ahead adds at most one more.
+    expect(pulls).toBeLessThanOrEqual(3);
+    expect(env.PINGS.rows).toEqual([]);
   });
 
   const malformed = [

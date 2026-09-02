@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeHandler } from "../src/index.js";
 import {
   DOWNLOAD_URL,
   FALLBACK_DMG_URL,
   NO_BUILD_URL,
   RELEASES_URL,
+  asset,
   jsonResponse,
   makeClock,
   makeEnv,
@@ -116,6 +117,20 @@ describe("/cataclysm/download", () => {
     );
   });
 
+  it("treats a DMG asset without a download URL as no DMG", async () => {
+    const env = makeEnv();
+    const response = await handlerWith(
+      releasesFetch([
+        release("v0.2.0", [
+          asset("v0.2.0", "Cataclysm-0.2.0.dmg", { browser_download_url: undefined }),
+        ]),
+      ]),
+    )(makeRequest(DOWNLOAD_URL), env);
+
+    expect(response.headers.get("Location")).toBe(NO_BUILD_URL);
+    expect(env.DOWNLOADS.rows).toEqual([]);
+  });
+
   it("treats several DMGs that all miss the tag as no DMG", async () => {
     const env = makeEnv();
     const response = await handlerWith(
@@ -145,6 +160,8 @@ describe("/cataclysm/download", () => {
   const failures = [
     ["an upstream 503", () => jsonResponse({ message: "nope" }, 503)],
     ["a rate-limit 403", () => jsonResponse({ message: "rate limited" }, 403)],
+    ["a 200 whose body is not a list", () => jsonResponse({ message: "moved" })],
+    ["a 200 whose body is not JSON", () => new Response("{not json", { status: 200 })],
     [
       "a network error",
       () => {
@@ -175,11 +192,41 @@ describe("/cataclysm/download", () => {
     });
   }
 
-  it("asks the API for the release list with an 8 second timeout", async () => {
-    const fetch = releasesFetch(stableReleases());
-    await handlerWith(fetch)(makeRequest(DOWNLOAD_URL), makeEnv());
+  describe("timeout", () => {
+    afterEach(() => vi.restoreAllMocks());
 
-    expect(fetch.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    it("asks the API for the release list with an 8 second timeout", async () => {
+      const timeout = vi.spyOn(AbortSignal, "timeout");
+      const fetch = releasesFetch(stableReleases());
+      await handlerWith(fetch)(makeRequest(DOWNLOAD_URL), makeEnv());
+
+      expect(timeout).toHaveBeenCalledWith(8000);
+      expect(fetch.calls[0][1].signal).toBe(timeout.mock.results[0].value);
+    });
+  });
+
+  it("trims an outsized user agent so the row stays under the blob cap", async () => {
+    const env = makeEnv();
+    await handlerWith(releasesFetch(stableReleases()))(
+      makeRequest(DOWNLOAD_URL, { headers: { "User-Agent": "x".repeat(6000) } }),
+      env,
+    );
+
+    expect(env.DOWNLOADS.rows[0].blobs[1]).toBe("x".repeat(512));
+  });
+
+  it("still redirects when the row is rejected", async () => {
+    const env = makeEnv();
+    env.DOWNLOADS.writeDataPoint = () => {
+      throw new Error("blob size limit exceeded");
+    };
+    const response = await handlerWith(releasesFetch(stableReleases()))(
+      makeRequest(DOWNLOAD_URL),
+      env,
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toContain("Cataclysm-0.2.0.dmg");
   });
 
   it("rejects methods other than GET and HEAD", async () => {
@@ -195,13 +242,16 @@ describe("/cataclysm/download", () => {
     expect(env.DOWNLOADS.rows).toEqual([]);
   });
 
-  it("serves HEAD like GET", async () => {
+  it("redirects HEAD like GET but does not count it", async () => {
+    const env = makeEnv();
     const response = await handlerWith(releasesFetch(stableReleases()))(
       makeRequest(DOWNLOAD_URL, { method: "HEAD" }),
-      makeEnv(),
+      env,
     );
 
     expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toContain("Cataclysm-0.2.0.dmg");
+    expect(env.DOWNLOADS.rows).toEqual([]);
   });
 });
 

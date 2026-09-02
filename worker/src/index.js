@@ -20,6 +20,8 @@ const FALLBACK_DMG_URL = `https://github.com/${REPO}/releases/latest/download/Ca
 
 const RELEASE_CACHE_MS = 10 * 60 * 1000;
 const GITHUB_TIMEOUT_MS = 8000;
+/** Real browser user agents run to about 150 characters. */
+const USER_AGENT_MAX_CHARS = 512;
 
 /** GitHub rejects any API request without a User-Agent with a 403. */
 const GITHUB_HEADERS = {
@@ -134,6 +136,10 @@ function noContent() {
  * bodies are one case, `undefined`, because the caller answers all three the
  * same way and `JSON.parse` never yields `undefined` for a valid document.
  *
+ * The body is consumed chunk by chunk and abandoned the moment the cap is
+ * passed, so an oversize POST costs the Worker at most one chunk of memory
+ * rather than the whole upload.
+ *
  * @param {Request} request
  * @param {number} maxBytes
  * @returns {Promise<unknown>}
@@ -141,12 +147,32 @@ function noContent() {
 async function readJson(request, maxBytes) {
   const declared = Number(request.headers.get("content-length"));
   // Cheap rejection before the body is read at all; the header is advisory, so
-  // the decoded length is checked again below.
+  // the bytes are counted again below.
   if (Number.isFinite(declared) && declared > maxBytes) return undefined;
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > maxBytes) return undefined;
+  if (!request.body) return undefined;
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   try {
-    return JSON.parse(text);
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return undefined;
   }
@@ -220,20 +246,6 @@ export function makeHandler({ fetch, now }) {
   }
 
   /**
-   * The newest release that is neither a draft nor a prerelease.
-   *
-   * @returns {Promise<{ ok: true, release: Release | null } | { ok: false }>}
-   */
-  async function newestStableRelease() {
-    const result = await loadReleases();
-    if (!result.ok) return { ok: false };
-    const release = result.releases.find(
-      (entry) => entry && !entry.draft && !entry.prerelease,
-    );
-    return { ok: true, release: release ?? null };
-  }
-
-  /**
    * @param {Request} request
    * @param {Record<string, any>} env
    * @returns {Promise<Response>}
@@ -243,25 +255,48 @@ export function makeHandler({ fetch, now }) {
       return methodNotAllowed("GET, HEAD");
     }
 
-    const result = await newestStableRelease();
+    const result = await loadReleases();
     // API failure: the version is unknown, so the row would be a lie. Serve the
     // version-stable fallback and accept that this download is invisible.
     if (!result.ok) return redirect(FALLBACK_DMG_URL);
-    if (!result.release) return redirect(NO_BUILD_URL);
+    const release = result.releases.find(
+      (entry) => entry && !entry.draft && !entry.prerelease,
+    );
+    if (!release) return redirect(NO_BUILD_URL);
 
-    const version = versionFromTag(result.release.tag_name);
-    const asset = findAsset(result.release, `Cataclysm-${version}.dmg`);
+    const version = versionFromTag(release.tag_name);
+    const asset = findAsset(release, `Cataclysm-${version}.dmg`);
     if (!asset || !asset.browser_download_url) return redirect(NO_BUILD_URL);
 
-    env.DOWNLOADS.writeDataPoint({
-      indexes: [version],
-      blobs: [
-        version,
-        request.headers.get("user-agent") ?? "",
-        request.cf?.country ?? "",
-      ],
-    });
+    // Only a GET is a download. HEAD is what link previews, uptime probes and
+    // link checkers send, and none of them fetch the image.
+    if (request.method === "GET") countDownload(request, env, version);
     return redirect(asset.browser_download_url);
+  }
+
+  /**
+   * One downloads row. The redirect must go out whatever happens here, so a
+   * rejected row (Analytics Engine caps a row's blobs at 5 KB and throws past
+   * it) is dropped rather than turned into an error page; the user agent is
+   * trimmed so an outsized header alone cannot reach that cap.
+   *
+   * @param {Request} request
+   * @param {Record<string, any>} env
+   * @param {string} version
+   */
+  function countDownload(request, env, version) {
+    try {
+      env.DOWNLOADS.writeDataPoint({
+        indexes: [version],
+        blobs: [
+          version,
+          (request.headers.get("user-agent") ?? "").slice(0, USER_AGENT_MAX_CHARS),
+          request.cf?.country ?? "",
+        ],
+      });
+    } catch {
+      // An invisible download beats a failed one.
+    }
   }
 
   /**

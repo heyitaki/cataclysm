@@ -48,6 +48,8 @@ Once a day, Cataclysm sends one small heartbeat to `akshath.me/cataclysm/ping` s
 
 Needs the Xcode command line tools. `make` builds `build/Cataclysm.app`; `make test` runs the tests. `make dmg VERSION=x.y.z` produces three of the four release assets: `Cataclysm-x.y.z.dmg` (the installer image, unsigned, with the signed app inside), `Cataclysm.dmg` (a byte-identical copy under a version-stable name) and `Cataclysm-x.y.z.zip` (the updater's archive). The fourth, `appcast.xml`, is the updater's feed and is built separately. For tuning, running the bundled binary with `--dump-scroll` logs each raw scroll event and the filter's decision to stdout.
 
+The download redirect and the heartbeat receiver are the Cloudflare Worker in [`worker/`](worker/), which needs Node and npm. `cd worker && npm install && npm test` runs its tests in plain Node (the report script's tests need `bash`, `curl` and `jq` too); `npm run check` is a dry-run deploy and `npm run deploy` publishes it through the `wrangler login` session on the machine. `worker/stats.sh` prints downloads per day, active installs, the cursor lock share and weekly cohort retention from Analytics Engine; it needs an API token with Account Analytics Read in `CLOUDFLARE_API_TOKEN`, and `worker/stats.sh --dry-run` prints the SQL it would run without one. To stop heartbeat collection without touching downloads, set `PING_ENABLED = "false"` in `worker/wrangler.toml` and redeploy.
+
 ## License
 
 MIT

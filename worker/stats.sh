@@ -55,13 +55,15 @@ if [[ -z "$account_id" ]]; then
   echo "stats.sh: no account_id in $script_dir/wrangler.toml" >&2
   exit 1
 fi
-readonly API_URL="https://api.cloudflare.com/client/v4/accounts/${account_id}/analytics_engine/sql"
+# STATS_API_URL is the test seam: the suite points it at a local server that
+# answers with fixture rows.
+readonly API_URL="${STATS_API_URL:-https://api.cloudflare.com/client/v4/accounts/${account_id}/analytics_engine/sql}"
+
+command -v jq >/dev/null || { echo "stats.sh: jq is required" >&2; exit 1; }
 
 token=""
 if (( DRY_RUN == 0 )); then
-  for tool in curl jq; do
-    command -v "$tool" >/dev/null || { echo "stats.sh: $tool is required" >&2; exit 1; }
-  done
+  command -v curl >/dev/null || { echo "stats.sh: curl is required" >&2; exit 1; }
   token="${CLOUDFLARE_API_TOKEN:-}"
   if [[ -z "$token" ]]; then
     token="$(security find-generic-password -s claude-local-cloudflare -w 2>/dev/null || true)"
@@ -75,9 +77,12 @@ fi
 readonly token
 
 # A dataset that has never been written does not exist yet, and the API says so
-# rather than returning nothing. That is an empty table, not a failure.
+# rather than returning nothing. That is an empty table, not a failure. The
+# message must name one of our datasets: a bare "does not exist" is just as
+# likely a mistyped column, and that has to fail loudly.
 is_missing_table() {
-  grep -qiE "unknown table|table .* not found|does not exist|doesn'?t exist" <<<"$1"
+  grep -qiE "unknown table|table .* not found|does not exist|doesn'?t exist" <<<"$1" \
+    && grep -qE "${DOWNLOADS_TABLE}|${PINGS_TABLE}" <<<"$1"
 }
 
 # Runs one SQL statement and prints its rows as a compact JSON array.
@@ -89,11 +94,13 @@ run_query() {
     return
   fi
 
+  # The token rides in on stdin (`-H @-`) so it never appears in curl's
+  # argument list, which any local process can read.
   local response status body data
   response="$(curl -sS -X POST "$API_URL" \
-    -H "Authorization: Bearer ${token}" \
+    -H @- \
     --data-binary "$sql" \
-    -w $'\n%{http_code}')" || {
+    -w $'\n%{http_code}' <<<"Authorization: Bearer ${token}")" || {
     echo "stats.sh: request to the SQL API failed" >&2
     exit 1
   }

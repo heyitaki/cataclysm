@@ -155,7 +155,7 @@ Read `specs/cataclysm-website.md` "Why each piece" (Gatekeeper paragraph and its
 
 Human-only items, in order:
 
-0. Turn on Analytics Engine for the account at `https://dash.cloudflare.com/9bdc7b059bbd6f7e6204d2d23e03e025/workers/analytics-engine`, then run `cd worker && npx wrangler deploy` (the code is written, tested and dry-run clean; only the account switch is missing) and run the Task 4 live curl checks. Everything live in Task 10 depends on this.
+0. Done 2026-09-02 (Task 4, re-run in Task 10): Analytics Engine is on for the account, the Worker is deployed, and every live curl check passes. Nothing left to do here.
 1. If the loop skipped the live `stats.sh` run: create a Cloudflare API token with Account Analytics Read, store it with `security add-generic-password -s claude-local-cloudflare -a aki -U -w "$(pbpaste)"`, run `CLOUDFLARE_API_TOKEN=$(security find-generic-password -s claude-local-cloudflare -w) worker/stats.sh`, and record the sampling hypothesis outcome in the spec.
 2. Preview the page: `cd ~/code/heyitaki.github.io && bundle exec jekyll serve --source ~/code/heyitaki.github.io-cataclysm --destination /tmp/cataclysm-site --port 4001`, then open `http://localhost:4001/cataclysm`. Edit in the worktree, or ask a session to. When happy: merge branch `cataclysm` into the site's `main` and push; the Pages workflow deploys it. Do not link it publicly until `/download` resolves a real DMG (w.6).
 3. Capture the Gatekeeper screenshots on macOS 26 (and macOS 15 if a machine is available), drop them into `assets/cataclysm/` at the names in the page's HTML comments, and replace the comments with `<img>` tags.
