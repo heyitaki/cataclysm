@@ -23,7 +23,7 @@ var cornerRadius = CGFloat(Settings.Default.cornerRadius)
 var scrollVerticalConfig = ScrollAxisConfig(
     invert: true, flatten: true, linesPerNotch: 1, mulThousandths: 1_000)
 var scrollHorizontalConfig = ScrollAxisConfig(
-    invert: false, flatten: true, linesPerNotch: 1, mulThousandths: 1_000)
+    invert: true, flatten: true, linesPerNotch: 1, mulThousandths: 1_000)
 var scrollAltDetection = false
 var scrollDump = false
 
@@ -127,7 +127,7 @@ final class SettingsModel: ObservableObject {
     @Published var mulThousandths = 1_000
     @Published var targetBundleID = ""
     @Published var pickerRows: [GamePickerRow] = []
-    @Published var invertHorizontal = false
+    @Published var invertHorizontal = true
     @Published var flattenNotches = true
     @Published var linesPerNotch = 1
     @Published var altTrackpadDetection = false
@@ -1092,10 +1092,10 @@ struct CataclysmApp: App {
 }
 
 // The default view (spec "The dropdown"), laid out as menu rows: every row
-// shares one height and inset, commands highlight on hover like menu items,
-// and the Advanced knobs live on a second page standing in for a submenu (a
-// `.window` panel has no real ones). Width fixed at 320 points so the panel
-// never reflows as values change.
+// shares one height and inset, commands lift on hover like Control Center
+// rows, and the Advanced knobs live on a second page standing in for a
+// submenu (a `.window` panel has no real ones). Width fixed at 320 points so
+// the panel never reflows as values change.
 struct PanelView: View {
     @ObservedObject var state: AppState
     @ObservedObject var model: SettingsModel
@@ -1104,6 +1104,14 @@ struct PanelView: View {
     @State private var sliderPos = 0.0
     @State private var draggingSlider = false
     @State private var dragStartPos = 0.0
+    // Whether the current drag has moved the thumb off where it was grabbed.
+    // An unmoved thumb neither previews nor commits: the stored value may sit
+    // off the snap grid (an older install's 1.37x) or beyond the slider's
+    // range, parked at the nearer end by design, and snapping it would
+    // flicker the readout on mouse-down or collapse the value to the bound.
+    // Deliberately independent of draggingSlider: commitSlider runs after
+    // that flag is already cleared, so folding it in would block every commit.
+    private var sliderMoved: Bool { sliderPos != dragStartPos }
     // Which page shows; every open starts on the main page.
     @State private var showingAdvanced = false
 
@@ -1131,6 +1139,7 @@ struct PanelView: View {
             AppRuntime.shared.refreshAccelHealth()
             sliderPos = sliderPosition(
                 forMultiplier: Double(model.mulThousandths) / 1_000)
+            dragStartPos = sliderPos
         }
     }
 
@@ -1223,16 +1232,16 @@ struct PanelView: View {
                           failed: scrollFailed,
                           held: false,
                           set: { AppRuntime.shared.setFlattenNotches($0) })
-            stepperRow("Lines per notch",
-                       value: model.linesPerNotch, range: 1...1000,
-                       set: { AppRuntime.shared.setLinesPerNotch($0) })
-                .disabled(!state.trusted || scrollFailed || !model.enabled)
-            featureToggle("Alternate trackpad detection",
+            featureToggle("Fallback trackpad detection",
                           isOn: model.altTrackpadDetection,
                           failed: scrollFailed,
                           held: false,
                           set: { AppRuntime.shared.setAltTrackpadDetection($0) })
             staticRow { HotkeyRow(state: state, model: model) }
+            stepperRow("Lines per notch",
+                       value: model.linesPerNotch, range: 1...1000,
+                       set: { AppRuntime.shared.setLinesPerNotch($0) })
+                .disabled(!state.trusted || scrollFailed || !model.enabled)
             stepperRow("Corner radius",
                        value: Int(model.cornerRadiusSetting), range: 0...200,
                        set: { AppRuntime.shared.setCornerRadius(Double($0)) })
@@ -1330,9 +1339,9 @@ struct PanelView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 8)
-                .frame(maxWidth: .infinity, minHeight: 28)
-                .background(RoundedRectangle(cornerRadius: 6)
+                .padding(.horizontal, menuRowInset)
+                .frame(maxWidth: .infinity, minHeight: menuRowHeight)
+                .background(RoundedRectangle(cornerRadius: menuControlCornerRadius)
                     .fill(Color.primary.opacity(0.1)))
                 .contentShape(Rectangle())
             }
@@ -1395,7 +1404,7 @@ struct PanelView: View {
     // setting reads off while the property is still -1, and a click here is
     // the only retry of that restore the panel offers.
     private var accelToggle: some View {
-        featureToggle("Mouse acceleration off",
+        featureToggle("Disable mouse acceleration",
                       isOn: model.accelOff,
                       failed: accelFailed,
                       unavailable: !state.trusted && !state.accelHeld,
@@ -1436,9 +1445,9 @@ struct PanelView: View {
     }
 
     private var sliderRow: some View {
-        // While dragging the readout previews the snapped release value;
-        // parked, it shows the stored value even beyond the slider's range.
-        let readout = draggingSlider
+        // Mid-drag the readout previews the snapped release value; otherwise
+        // it shows the stored value.
+        let readout = draggingSlider && sliderMoved
             ? mulThousandths(forMultiplier: multiplier(forSliderPosition: sliderPos))
             : model.mulThousandths
         return staticRow {
@@ -1463,10 +1472,7 @@ struct PanelView: View {
     }
 
     private func commitSlider() {
-        // An untouched thumb writes nothing: a stored value outside the
-        // slider's range parks at the nearer end by design, and committing
-        // that park would collapse the legal stored value to the bound.
-        guard sliderPos != dragStartPos else { return }
+        guard sliderMoved else { return }
         let thousandths = mulThousandths(
             forMultiplier: multiplier(forSliderPosition: sliderPos))
         AppRuntime.shared.setMulThousandths(thousandths)
@@ -1505,15 +1511,21 @@ struct PanelView: View {
 }
 
 let menuPanelWidth: CGFloat = 320
-// Corner geometry: the window's corner radius, the inset of the rows from
-// the edge, and the highlight's own radius, kept concentric (outer radius
-// minus inset) so a highlighted edge row nests in the window corner the way
-// a native menu item does.
-// Measured off the MenuBarExtra window on macOS 26 (zoomed capture), not
-// documented anywhere.
+// Corner geometry: the window's corner radius and the inset of the rows from
+// the edge, measured off the MenuBarExtra window on macOS 26 (zoomed
+// capture), not documented anywhere. The row hover highlight reuses the
+// window's radius, which on a 28-point row is a full pill, the shape
+// Control Center's rows take; a concentric inner radius (14 minus the inset)
+// read as a squarer corner than the panel's. Controls drawn inside the rows
+// (the game dropdown, bezel buttons) share one smaller radius.
 let menuPanelCornerRadius: CGFloat = 14
 let menuPanelInset: CGFloat = 6
-let menuHighlightRadius = menuPanelCornerRadius - menuPanelInset
+let menuControlCornerRadius: CGFloat = 6
+let menuPanelShape = RoundedRectangle(cornerRadius: menuPanelCornerRadius, style: .continuous)
+// Control Center's row hover: a translucent wash of the label color, white
+// on the dark panel and black on the light one, eyeballed off the Wi-Fi
+// module rather than read from any documented token.
+let menuHoverFill = Color.primary.opacity(0.1)
 let menuRowHeight: CGFloat = 28
 let menuRowInset: CGFloat = 8
 
@@ -1534,28 +1546,72 @@ struct PanelBackground: View {
         if #available(macOS 26, *) {
             Color.clear
         } else {
-            let shape = RoundedRectangle(cornerRadius: menuPanelCornerRadius, style: .continuous)
-            shape.fill(fill)
-                .overlay(shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
+            menuPanelShape.fill(fill)
+                .overlay(menuPanelShape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
         }
     }
 }
 
-// Drops the MenuBarExtra window's shadow. On a dark panel the shadow paints
-// a bright rim light along the edge that no content can cover (it sits
-// above the content view); PanelBackground's hairline defines the edge
-// instead. Runs once the view is in a window, which is after makeNSView.
+// Gap between the menu bar's bottom edge and the panel's top edge. Control
+// Center's modules open 1 point below the bar (measured off the Wi-Fi
+// module, macOS 26); MenuBarExtra places its `.window` 2 points below, one
+// point lower than every native panel beside it.
+let menuPanelTopGap: CGFloat = 1
+// Largest downward miss the lift corrects. Wide enough for the 1-point
+// MenuBarExtra miss with slack for a scaled display; far under the 25 or
+// more points a hidden menu bar leaves, where the placement is deliberate.
+let menuPanelMaxLift: CGFloat = 4
+
+// Window-level fixes the MenuBarExtra window needs: drops the shadow, which
+// on a dark panel paints a bright rim light along the edge that no content
+// can cover (it sits above the content view; PanelBackground's hairline
+// defines the edge instead), and lifts the window to the native gap below
+// the menu bar. The hosting view learns its window in viewDidMoveToWindow,
+// so the fixes and the observers that keep them applied hang off that.
 struct PanelWindowStyle: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { view.window?.hasShadow = false }
-        return view
+    func makeNSView(context: Context) -> NSView { HostView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class HostView: NSView {
+        private var observers: [NSObjectProtocol] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers.removeAll()
+            guard let window else { return }
+            PanelWindowStyle.style(window)
+            // MenuBarExtra re-places the window on every open, after SwiftUI's
+            // update pass, so the lift has to follow the system's own move:
+            // both notifications fire on each open, and the lift is a no-op
+            // once the window sits at the target. A nil queue runs the block
+            // inline on the posting (main) thread, inside the placement, so
+            // the panel never draws a frame at the system's gap and then
+            // steps up.
+            let names = [NSWindow.didMoveNotification, NSWindow.didChangeOcclusionStateNotification]
+            for name in names {
+                observers.append(NotificationCenter.default.addObserver(
+                    forName: name, object: window, queue: nil) { [weak window] _ in
+                        if let window { PanelWindowStyle.style(window) }
+                    })
+            }
+        }
+
+        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
     }
 
-    // The deferred write above can race the view's window attachment; every
-    // later update retries the (idempotent) write in case it lost.
-    func updateNSView(_ nsView: NSView, context: Context) {
-        nsView.window?.hasShadow = false
+    private static func style(_ window: NSWindow) {
+        if window.hasShadow { window.hasShadow = false }
+        // visibleFrame's top is the menu bar's bottom edge on the window's own
+        // screen. Only a downward miss is corrected: never push a panel the
+        // system deliberately placed lower (a screen whose top is not the bar).
+        // The half-point dead band keeps a backing-store-rounded landing from
+        // re-arming the didMove handler forever.
+        guard let screen = window.screen else { return }
+        let lift = screen.visibleFrame.maxY - menuPanelTopGap - window.frame.maxY
+        if lift > 0.5, lift < menuPanelMaxLift {
+            window.setFrameOrigin(NSPoint(x: window.frame.minX, y: window.frame.minY + lift))
+        }
     }
 }
 
@@ -1577,7 +1633,7 @@ struct BezelButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .frame(minWidth: 20, minHeight: 22)
-                .background(RoundedRectangle(cornerRadius: 6)
+                .background(RoundedRectangle(cornerRadius: menuControlCornerRadius)
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.22 : 0.1)))
                 .opacity(enabled ? 1 : 0.35)
                 .contentShape(Rectangle())
@@ -1585,10 +1641,11 @@ struct BezelButtonStyle: ButtonStyle {
     }
 }
 
-// A command row that behaves like a menu item: full width, highlighted with
-// the accent color while hovered, dimmed and inert while disabled. The title
-// is a plain string so the button keeps an accessibility name; symbols are
-// optional decorations before and after it.
+// A command row that behaves like a Control Center item: full width, lifted
+// by a faint translucent tint while hovered (the same wash Control Center's
+// rows wear, not the accent-blue selection of a classic NSMenu), dimmed and
+// inert while disabled. The title is a plain string so the button keeps an
+// accessibility name; symbols are optional decorations before and after it.
 struct MenuRow: View {
     let title: String
     var leadingSymbol: String? = nil
@@ -1616,11 +1673,8 @@ struct MenuRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(highlighted ? Color.white
-                         : !enabled ? Color.secondary
-                         : tint ?? Color.primary)
-        .background(RoundedRectangle(cornerRadius: menuHighlightRadius)
-            .fill(highlighted ? Color.accentColor : Color.clear))
+        .foregroundStyle(!enabled ? Color.secondary : tint ?? Color.primary)
+        .background(menuPanelShape.fill(highlighted ? menuHoverFill : Color.clear))
         .onHover { hovering = $0 }
         // A dismissal with the pointer still over the row (its own action
         // handing focus away, Escape, another app taking key) delivers no
@@ -1652,7 +1706,7 @@ struct HotkeyRow: View {
 
     var body: some View {
         HStack {
-            Text("Jail toggle hotkey")
+            Text("Cursor lock toggle hotkey")
             if state.hotkeyRegistrationFailed {
                 Text("in use by another app").font(.caption).foregroundStyle(.red)
             }
@@ -1663,13 +1717,15 @@ struct HotkeyRow: View {
                 recording ? stopRecording() : startRecording()
             } label: {
                 Text(recording
-                        ? "Press keys… (Esc cancels)"
+                        ? "Press keys…"
                         : hotkeyChordLabel(keyCode: model.hotkeyKeyCode,
                                            modifiers: model.hotkeyModifiers))
                     .monospacedDigit()
+                    .lineLimit(1)
                     .padding(.horizontal, 6)
             }
             .buttonStyle(BezelButtonStyle())
+            .help(recording ? "Esc cancels" : "Click, then press the new chord")
         }
         .onDisappear { stopRecording() }
     }

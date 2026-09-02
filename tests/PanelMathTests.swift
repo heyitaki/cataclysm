@@ -1,6 +1,6 @@
 // Harness for the scroll speed slider math (PanelMath.swift): the log-scale
 // position mapping, the park-at-nearer-end rule for out-of-slider-range
-// stored values, the two-decimal snap, and the readout formatting.
+// stored values, the 0.05x snap, and the readout formatting.
 //
 // Build and run: make test
 
@@ -52,20 +52,36 @@ struct PanelMathTests {
     }
 
     static func snapTests() {
-        // Two-decimal multipliers survive the position round trip exactly.
-        for value in [0.25, 0.5, 1.0, 1.37, 2.0, 4.0] {
+        // On-grid multipliers survive the position round trip exactly.
+        for value in [0.25, 0.5, 1.0, 1.35, 2.0, 4.0] {
             checkEq(multiplier(forSliderPosition: sliderPosition(forMultiplier: value)), value,
                     "snap: \(value) round-trips")
         }
-        // An arbitrary track position snaps to two decimals.
-        checkEq(multiplier(forSliderPosition: 0.1), 1.11, "snap: exp(0.1) snaps to 1.11")
+        // An arbitrary track position snaps to the nearest 0.05x.
+        checkEq(multiplier(forSliderPosition: 0.1), 1.10,
+                "snap: exp(0.1), about 1.1052, snaps to 1.10")
+        checkEq(multiplier(forSliderPosition: sliderPosition(forMultiplier: 1.37)), 1.35,
+                "snap: 1.37 snaps to 1.35")
+        checkEq(multiplier(forSliderPosition: sliderPosition(forMultiplier: 1.38)), 1.40,
+                "snap: 1.38 snaps to 1.40")
+        // Every grid point snaps to the exact shortest double for its
+        // decimal (the thousandths conversion would hide a 1-ulp miss, and
+        // n * 0.05 misses at 29 of these 76 points) and stores as a whole
+        // number of thousandths.
+        for i in 5...80 {
+            let value = Double(i) / 20
+            let snapped = multiplier(forSliderPosition: sliderPosition(forMultiplier: value))
+            checkEq(snapped, value, "snap: grid point \(i) is exactly \(value)")
+            checkEq(mulThousandths(forMultiplier: snapped), i * 50,
+                    "store: grid point \(i) stores as \(i * 50) thousandths")
+        }
         checkEq(multiplier(forSliderPosition: sliderPositionRange.lowerBound), 0.25,
                 "snap: lower end reads 0.25")
         checkEq(multiplier(forSliderPosition: sliderPositionRange.upperBound), 4.0,
                 "snap: upper end reads 4.00")
         // Storage conversion of already-snapped values.
         checkEq(mulThousandths(forMultiplier: 0.25), 250, "store: 0.25 is 250 thousandths")
-        checkEq(mulThousandths(forMultiplier: 1.11), 1_110, "store: 1.11 is 1110 thousandths")
+        checkEq(mulThousandths(forMultiplier: 1.15), 1_150, "store: 1.15 is 1150 thousandths")
         checkEq(mulThousandths(forMultiplier: 4.0), 4_000, "store: 4.00 is 4000 thousandths")
     }
 

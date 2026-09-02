@@ -75,7 +75,7 @@ struct SettingsTests {
         checkEq(s.cornerRadius, 18.0, "default: corner radius")
         checkEq(s.accelerationOff, true, "default: acceleration off")
         checkEq(s.invertVertical, true, "default: invert vertical")
-        checkEq(s.invertHorizontal, false, "default: natural horizontal")
+        checkEq(s.invertHorizontal, true, "default: inverted horizontal")
         checkEq(s.flattenNotches, true, "default: flatten on")
         checkEq(s.linesPerNotch, 1, "default: 1 line per notch")
         checkEq(s.mulThousandths, 1_000, "default: multiplier 1.0")
@@ -146,11 +146,11 @@ struct SettingsTests {
 
         // NSNumber bridges booleans to Int (true is 1) and numbers to Bool,
         // so the boolean/number distinction has to be checked explicitly.
-        // Keys are chosen so coercion and fallback differ: invertHorizontal
+        // Keys are chosen so coercion and fallback differ: altTrackpadDetection
         // defaults false (coercing 1 would read true), cornerRadius defaults
         // 18 (coercing true would read 1.0).
-        store.set(1, forKey: Settings.Key.invertHorizontal)
-        checkEq(s.invertHorizontal, false, "bool: stored number falls back")
+        store.set(1, forKey: Settings.Key.altTrackpadDetection)
+        checkEq(s.altTrackpadDetection, false, "bool: stored number falls back")
         store.set(true, forKey: Settings.Key.cornerRadius)
         checkEq(s.cornerRadius, 18.0, "double: stored boolean falls back")
 

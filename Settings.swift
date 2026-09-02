@@ -147,7 +147,7 @@ final class Settings {
     }
 
     var invertHorizontal: Bool {
-        get { bool(Key.invertHorizontal, or: false) }
+        get { bool(Key.invertHorizontal, or: true) }
         set { defaults.set(newValue, forKey: Key.invertHorizontal) }
     }
 

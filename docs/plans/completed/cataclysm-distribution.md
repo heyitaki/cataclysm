@@ -85,7 +85,7 @@ Traps already paid for, do not rediscover:
 
 ### Task 7: Panel default view and status rows
 
-- [x] Read the spec's "The dropdown" layout. Default view at fixed 320pt width: header, jail toggle with game-picker placeholder row, acceleration toggle, invert-wheel toggle, scroll speed slider (log-scaled 0.25x-4.0x, two-decimal snap, `.monospacedDigit()` readout, reset-to-1.00x control), Launch at login toggle via `SMAppService.mainApp`, Quit. Every control writes through the settings store and applies immediately.
+- [x] Read the spec's "The dropdown" layout. Default view at fixed 320pt width: header, jail toggle with game-picker placeholder row, acceleration toggle, invert-wheel toggle, scroll speed slider (log-scaled 0.25x-4.0x, 0.05x snap, `.monospacedDigit()` readout, reset-to-1.00x control), Launch at login toggle via `SMAppService.mainApp`, Quit. Every control writes through the settings store and applies immediately.
 - [x] Status and failure rows per spec: ungranted header warning with reopen-onboarding button, failed acceleration write showing failed rather than checked, failed tap creation on the affected feature, watcher unregistered or requiring approval showing crash-recovery-off with the Login Items deep link.
 - [x] `make app` and `make test` exit 0; both `-target` typechecks pass on the app source list.
 
