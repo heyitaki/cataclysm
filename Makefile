@@ -10,8 +10,8 @@ APP = build/Cataclysm.app
 # Explicit source list; a *.swift glob would silently pick up any stray file.
 APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift JailMath.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift MenuBarIcon.swift
 
-# Extra codesign flags for the release path (--timestamp); local builds stay
-# offline-friendly without one.
+# Extra codesign flags (e.g. --timestamp); local builds stay offline-friendly
+# without any.
 CODESIGN_FLAGS ?=
 
 # Bare `make` builds the app; the standalone CLI is retired.
@@ -33,9 +33,11 @@ build/cataclysm: build/cataclysm-arm64 build/cataclysm-x86_64
 # Bundle assembly is cheap, so `app` rebuilds it every run rather than trusting
 # a directory mtime. Signing identity is self-signed; CSSMERR_TP_NOT_TRUSTED
 # from find-identity is expected, the working check is that codesign succeeds.
-# --options runtime (hardened runtime) is mandatory for notarization and
-# harmless locally, so every build carries it; IDENTITY is quoted because the
-# release identity ("Developer ID Application: ...") contains spaces.
+# --options runtime (hardened runtime) is harmless locally and keeps the
+# bundle ready for a notarizing identity should one ever exist; IDENTITY is
+# quoted because such identities ("Developer ID Application: ...") contain
+# spaces. Releases are never notarized: the website walks users through
+# Open Anyway instead (specs/progress.md r.10).
 app: build/cataclysm build/Cataclysm.icns packaging/Info.plist.in packaging/$(BUNDLE_ID).watch.plist
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(APP)/Contents/Library/LaunchAgents
@@ -154,36 +156,36 @@ build/jailmath-tests: JailMath.swift tests/JailMathTests.swift
 	xcrun swiftc -O JailMath.swift tests/JailMathTests.swift -o $@
 
 DMG = build/Cataclysm-$(VERSION).dmg
+STABLE_DMG = build/Cataclysm.dmg
+ZIP = build/Cataclysm-$(VERSION).zip
 
-# Drag-to-install image: app plus an /Applications symlink, Finder default
-# layout (the arrow-and-background presentation would need create-dmg; the
-# plain hdiutil image is the spec's always-available fallback). Signed with
-# whatever IDENTITY is configured; never notarized.
-dmg: app
-	rm -rf build/dmg-stage $(DMG)
+# Release assets (specs/cataclysm-website.md "Release asset contract"):
+# the versioned drag-to-install image, a byte-identical copy under a
+# version-stable name so the website's /download fallback can address it
+# without an API call, and the updater zip (ditto -c -k --keepParent keeps the
+# signature, nested code and symlinks intact). The fourth asset, appcast.xml,
+# comes from a separate `make appcast` (auto-update u.3) because it needs the
+# EdDSA key from the login keychain. No .zip.sha256: the appcast carries the
+# zip's length and signature.
+#
+# The image itself is deliberately NOT signed. Only the app inside is. A DMG
+# signed with the self-signed identity is refused at mount time with no
+# Open Anyway entry in Privacy & Security (verified on macOS 26.3), whereas an
+# unsigned quarantined image mounts silently and the app's own first-launch
+# dialog is the one users can get past. The plain hdiutil layout stays: the
+# read-me next to the app icon replaces a Finder background image, which a
+# read-only image cannot store.
+dmg: app packaging/dmg-readme.txt
+	rm -rf build/dmg-stage $(DMG) $(STABLE_DMG) $(ZIP)
 	mkdir -p build/dmg-stage
 	cp -R $(APP) build/dmg-stage/
 	ln -s /Applications build/dmg-stage/Applications
+	cp packaging/dmg-readme.txt "build/dmg-stage/Read me first.txt"
 	hdiutil create -volname Cataclysm -srcfolder build/dmg-stage -ov -format UDZO $(DMG)
-	codesign -f $(CODESIGN_FLAGS) -s "$(IDENTITY)" $(DMG)
-	codesign --verify $(DMG)
-
-# Notarized release. Refuses up front, before building anything, when the
-# Developer ID identity or the notary keychain profile is missing, so an
-# unnotarized DMG never ships under a name that promises otherwise. The
-# stapler step doubles as the check that notarization happened: it fails
-# with Error 65 without a ticket.
-release:
-	@case "$(IDENTITY)" in \
-	"Developer ID Application"*) ;; \
-	*) echo 'make release: IDENTITY is "$(IDENTITY)", but notarization needs a "Developer ID Application: ..." identity. Pass IDENTITY="Developer ID Application: <name> (<team>)" or use `make dmg` for a local-identity image.'; exit 1;; \
-	esac
-	@test -n "$(NOTARY_PROFILE)" || { echo 'make release: NOTARY_PROFILE is unset. Store credentials once with `xcrun notarytool store-credentials <profile>` and pass NOTARY_PROFILE=<profile>.'; exit 1; }
-	$(MAKE) dmg VERSION=$(VERSION) IDENTITY="$(IDENTITY)" CODESIGN_FLAGS=--timestamp
-	xcrun notarytool submit $(DMG) --keychain-profile "$(NOTARY_PROFILE)" --wait
-	xcrun stapler staple $(DMG)
+	cp $(DMG) $(STABLE_DMG)
+	ditto -c -k --keepParent $(APP) $(ZIP)
 
 clean:
 	rm -rf build
 
-.PHONY: all app test typecheck clean dmg release install
+.PHONY: all app test typecheck clean dmg install
