@@ -83,10 +83,10 @@ Nothing was implemented for this task and nothing should be. The remaining tasks
 
 Read `specs/cataclysm-website.md` "Usage and retention", "Analytics Engine schema" and the `stats.sh` default in Context.
 
-- [ ] Implement `/cataclysm/ping` per the Context defaults: method, size cap, strict field validation with no extra fields, `PING_ENABLED` gate, 204 and the `PINGS` row shape.
-- [ ] `worker/test/ping.test.js`: valid payload gives 204 and exactly the specified row; nil-UUID probe accepted; GET 405; body over 1024 bytes 400; invalid JSON 400; each field missing, one extra field, uppercase UUID, `created` not `YYYY-MM-DD`, `version` with a letter, `arch` of `x64`, `enabled` as the string `"true"`: each 400 with no row; `PING_ENABLED = "false"` gives 204 with no row; `?v=1` query still served.
-- [ ] `worker/stats.sh` per the Context default, executable, with a `--dry-run` flag that prints each SQL statement instead of calling the API so the queries can be reviewed without credentials. `bash -n worker/stats.sh` and `worker/stats.sh --dry-run` both exit 0, and the dry run prints one statement per query the script defines (the two sampling asserts, downloads per day, DAU, WAU, jail share, cohort weeks, active weeks), each excluding the nil UUID where it touches `cataclysm_pings`.
-- [ ] `cd worker && npm test` exits 0; `make test` exits 0; `specs/cataclysm-website.md` rows w.1 and w.1a marked done with the date.
+- [x] Implement `/cataclysm/ping` per the Context defaults: method, size cap, strict field validation with no extra fields, `PING_ENABLED` gate, 204 and the `PINGS` row shape.
+- [x] `worker/test/ping.test.js`: valid payload gives 204 and exactly the specified row; nil-UUID probe accepted; GET 405; body over 1024 bytes 400; invalid JSON 400; each field missing, one extra field, uppercase UUID, `created` not `YYYY-MM-DD`, `version` with a letter, `arch` of `x64`, `enabled` as the string `"true"`: each 400 with no row; `PING_ENABLED = "false"` gives 204 with no row; `?v=1` query still served.
+- [x] `worker/stats.sh` per the Context default, executable, with a `--dry-run` flag that prints each SQL statement instead of calling the API so the queries can be reviewed without credentials. `bash -n worker/stats.sh` and `worker/stats.sh --dry-run` both exit 0, and the dry run prints one statement per query the script defines (the two sampling asserts, downloads per day, DAU, WAU, jail share, cohort weeks, active weeks), each excluding the nil UUID where it touches `cataclysm_pings`.
+- [x] `cd worker && npm test` exits 0; `make test` exits 0; `specs/cataclysm-website.md` rows w.1 and w.1a marked done with the date.
 
 ### Task 4: Deploy the Worker and verify the live routes
 

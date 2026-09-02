@@ -6,6 +6,47 @@ export const FALLBACK_DMG_URL =
   "https://github.com/heyitaki/cataclysm/releases/latest/download/Cataclysm.dmg";
 export const RELEASES_URL =
   "https://api.github.com/repos/heyitaki/cataclysm/releases?per_page=10";
+export const PING_URL = "https://akshath.me/cataclysm/ping";
+
+/** The reserved probe identity: the only install id a live check may send. */
+export const PROBE_INSTALL_ID = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * A heartbeat exactly as the app sends it. Overrides replace a field; a field
+ * set to `undefined` is dropped, which is how the missing-field cases are built.
+ *
+ * @param {Record<string, unknown>} [overrides]
+ */
+export function ping(overrides = {}) {
+  const payload = {
+    install: "8b4f1d2e-6c37-4a91-b0d5-1e7f2a3c4d59",
+    created: "2026-08-30",
+    version: "0.1.0",
+    macos: "26.3.0",
+    arch: "arm64",
+    enabled: true,
+    jailEnabled: false,
+    ...overrides,
+  };
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined) delete payload[key];
+  }
+  return payload;
+}
+
+/**
+ * A POST carrying `body` (an object is serialised, a string is sent as is).
+ *
+ * @param {object | string} body
+ * @param {string} [url]
+ */
+export function pingRequest(body, url = PING_URL) {
+  return makeRequest(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}
 
 /**
  * A release asset as the GitHub API returns it.
