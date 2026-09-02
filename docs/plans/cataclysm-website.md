@@ -144,12 +144,12 @@ Read `specs/cataclysm-website.md` "Why each piece" (Gatekeeper paragraph and its
 
 ### Task 10: Verify acceptance criteria
 
-- [ ] `make test` exits 0 with every harness at `0 failed`, including `telemetry-tests`; `make app` and `codesign --verify --strict build/Cataclysm.app` exit 0; `make dmg` passes the mount check and `build/Cataclysm-0.1.0.dmg`, `build/Cataclysm.dmg` and `build/Cataclysm-0.1.0.zip` exist.
-- [ ] `cd worker && npm test` exits 0 and `npm run check` exits 0; `bash -n worker/stats.sh` exits 0.
-- [ ] Live: the curl checks from Task 4 still hold against `https://akshath.me`.
-- [ ] Jekyll build of the worktree exits 0 and `/tmp/cataclysm-site/cataclysm.html` is present; the site main checkout is untouched.
-- [ ] `grep -rn 'github.com/heyitaki/cataclysm/releases' README.md CataclysmApp.swift` returns only the Worker's own fallback URL if any and no user-facing link; `grep -n 'release:' Makefile` returns nothing; `grep -c 'telemetry.enabled' Settings.swift` is at least 1.
-- [ ] Every queue row this run owns (w.0 to w.5a in `specs/cataclysm-website.md`; the zip and version-stable DMG note on u.3 in `specs/auto-update.md`) shows a state other than "not started" with a date, and every hypothesis checked here has its outcome recorded. Working tree clean.
+- [x] (2026-09-02: ten harnesses, all `0 failed`, telemetry-tests 56 passed; `make app` and codesign exit 0; `make dmg` exit 0, image `not signed at all`, mount lists `Applications`, `Cataclysm.app`, `Read me first.txt`; all three assets present) `make test` exits 0 with every harness at `0 failed`, including `telemetry-tests`; `make app` and `codesign --verify --strict build/Cataclysm.app` exit 0; `make dmg` passes the mount check and `build/Cataclysm-0.1.0.dmg`, `build/Cataclysm.dmg` and `build/Cataclysm-0.1.0.zip` exist.
+- [x] (2026-09-02: 67 vitest cases pass; dry run lists `DOWNLOADS` and `PINGS`; stats.sh parses) `cd worker && npm test` exits 0 and `npm run check` exits 0; `bash -n worker/stats.sh` exits 0.
+- [x] (2026-09-02: `/download?src=page` 302 to `?error=no-build`; `/download-notes` 404 from the Pages site via Cloudflare; `/ping` GET 405, malformed 400, nil-UUID payload 204; twenty sequential `/download` requests all 302. Keychain item `claude-local-cloudflare` still absent, so the `stats.sh` live run stays skipped and the sampling hypothesis stays open per Post-Completion item 1) Live: the curl checks from Task 4 still hold against `https://akshath.me`.
+- [x] (2026-09-02: build exit 0, page present with the download href, "Open Anyway", `<details>` and no Liquid leftovers; main checkout still shows exactly ` M Gemfile.lock`, ` M index.html`, `?? assets/js/` with a byte-identical diff before and after) Jekyll build of the worktree exits 0 and `/tmp/cataclysm-site/cataclysm.html` is present; the site main checkout is untouched.
+- [x] (2026-09-02: the releases grep returns nothing, `release:` grep returns nothing, `telemetry.enabled` count is 1) `grep -rn 'github.com/heyitaki/cataclysm/releases' README.md CataclysmApp.swift` returns only the Worker's own fallback URL if any and no user-facing link; `grep -n 'release:' Makefile` returns nothing; `grep -c 'telemetry.enabled' Settings.swift` is at least 1.
+- [x] (2026-09-02: w.0, w.1, w.1a, w.2, w.4, w.4a, w.5, w.5a done, w.3 "page written, awaiting preview", u.3 partial, all dated; GitHub budget hypothesis confirmed, sampling hypothesis recorded as open pending the analytics token) Every queue row this run owns (w.0 to w.5a in `specs/cataclysm-website.md`; the zip and version-stable DMG note on u.3 in `specs/auto-update.md`) shows a state other than "not started" with a date, and every hypothesis checked here has its outcome recorded. Working tree clean.
 
 ## Post-Completion
 
