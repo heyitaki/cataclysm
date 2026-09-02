@@ -154,15 +154,20 @@ async function readJson(request, maxBytes) {
   const reader = request.body.getReader();
   const chunks = [];
   let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel();
-      return undefined;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } catch {
+    // A connection that drops mid-body is a bad request, not a Worker error.
+    return undefined;
   }
 
   const bytes = new Uint8Array(size);
@@ -322,7 +327,12 @@ export function makeHandler({ fetch, now }) {
     const row = pingRow(await readJson(request, PING_MAX_BYTES));
     if (!row) return badRequest();
 
-    env.PINGS.writeDataPoint(row);
+    try {
+      env.PINGS.writeDataPoint(row);
+    } catch {
+      // Same rule as countDownload: a dropped row beats a 500 the app would
+      // ignore anyway.
+    }
     return noContent();
   }
 

@@ -215,6 +215,33 @@ describe("/cataclysm/ping", () => {
     expect(env.PINGS.rows).toEqual([]);
   });
 
+  it("answers 400 and writes nothing when the body stream fails mid-read", async () => {
+    const env = makeEnv();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("{"));
+        controller.error(new Error("connection reset"));
+      },
+    });
+    const response = await handler()(
+      makeRequest(PING_URL, { method: "POST", body: stream, duplex: "half" }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(env.PINGS.rows).toEqual([]);
+  });
+
+  it("still answers 204 when the row is rejected", async () => {
+    const env = makeEnv();
+    env.PINGS.writeDataPoint = () => {
+      throw new Error("blob size limit exceeded");
+    };
+    const response = await handler()(pingRequest(ping()), env);
+
+    expect(response.status).toBe(204);
+  });
+
   const malformed = [
     ["invalid JSON", "{not json"],
     ["an empty body", ""],
