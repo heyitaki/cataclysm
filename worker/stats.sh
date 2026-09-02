@@ -70,7 +70,7 @@ if (( DRY_RUN == 0 )); then
   fi
   if [[ -z "$token" ]]; then
     echo "stats.sh: no analytics token. Set CLOUDFLARE_API_TOKEN, or store one" >&2
-    echo "          with: security add-generic-password -s claude-local-cloudflare -a \"\$USER\" -U -w" >&2
+    echo "          with: security add-generic-password -s claude-local-cloudflare -a \"\$USER\" -U -w \"\$(pbpaste)\"" >&2
     exit 1
   fi
 fi

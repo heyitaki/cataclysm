@@ -281,6 +281,51 @@ describe("release cache", () => {
     expect(fetch.calls).toHaveLength(2);
   });
 
+  it("shares one API call between concurrent cold requests", async () => {
+    let answer;
+    const fetch = stubFetch(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const handle = handlerWith(fetch);
+
+    const pending = Array.from({ length: 20 }, () =>
+      handle(makeRequest(DOWNLOAD_URL), makeEnv()),
+    );
+    answer(jsonResponse(stableReleases()));
+    const responses = await Promise.all(pending);
+
+    expect(fetch.calls).toHaveLength(1);
+    for (const response of responses) {
+      expect(response.headers.get("Location")).toContain("Cataclysm-0.2.0.dmg");
+    }
+  });
+
+  it("looks up again after a shared lookup fails", async () => {
+    let attempt = 0;
+    const fetch = stubFetch(() => {
+      attempt += 1;
+      if (attempt === 1) return jsonResponse({ message: "nope" }, 503);
+      return jsonResponse(stableReleases());
+    });
+    const handle = handlerWith(fetch);
+
+    const cold = await Promise.all([
+      handle(makeRequest(DOWNLOAD_URL), makeEnv()),
+      handle(makeRequest(DOWNLOAD_URL), makeEnv()),
+    ]);
+    const retry = await handle(makeRequest(DOWNLOAD_URL), makeEnv());
+
+    expect(fetch.calls).toHaveLength(2);
+    expect(cold.map((r) => r.headers.get("Location"))).toEqual([
+      FALLBACK_DMG_URL,
+      FALLBACK_DMG_URL,
+    ]);
+    expect(retry.headers.get("Location")).toContain("Cataclysm-0.2.0.dmg");
+  });
+
   it("does not cache a failure", async () => {
     let attempt = 0;
     const fetch = stubFetch((url) => {

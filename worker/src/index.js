@@ -224,15 +224,39 @@ export function makeHandler({ fetch, now }) {
   let releaseCache = null;
 
   /**
-   * Fetches the recent releases, newest first. Failures are not cached: an
-   * outage should not pin the fallback for ten minutes.
+   * The lookup in flight while the cache is cold. Requests that arrive during
+   * it share its result instead of each spending one of GitHub's 60 per-hour
+   * unauthenticated calls, which a burst on a cold cache could otherwise
+   * exhaust in one go.
+   *
+   * @type {Promise<{ ok: true, releases: Release[] } | { ok: false }> | null}
+   */
+  let releaseLookup = null;
+
+  /**
+   * The recent releases, newest first, from the cache or one shared lookup.
    *
    * @returns {Promise<{ ok: true, releases: Release[] } | { ok: false }>}
    */
-  async function loadReleases() {
+  function loadReleases() {
     if (releaseCache && releaseCache.expires > now()) {
-      return { ok: true, releases: releaseCache.releases };
+      return Promise.resolve({ ok: true, releases: releaseCache.releases });
     }
+    if (!releaseLookup) {
+      releaseLookup = fetchReleases().finally(() => {
+        releaseLookup = null;
+      });
+    }
+    return releaseLookup;
+  }
+
+  /**
+   * Fetches the recent releases. Failures are not cached: an outage should not
+   * pin the fallback for ten minutes.
+   *
+   * @returns {Promise<{ ok: true, releases: Release[] } | { ok: false }>}
+   */
+  async function fetchReleases() {
     try {
       const response = await fetch(RELEASES_URL, {
         headers: GITHUB_HEADERS,
