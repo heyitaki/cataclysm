@@ -99,6 +99,28 @@ describe("/cataclysm/ping", () => {
     });
   }
 
+  // A cross-origin POST with a text/plain body needs no preflight, so any web
+  // page could make its visitors write rows. Browsers always attach Origin on
+  // a cross-origin POST and URLSession never does, so the header alone tells
+  // the two apart.
+  it("rejects a browser-originated POST with 400 and writes nothing", async () => {
+    const env = makeEnv();
+    const response = await handler()(
+      makeRequest(PING_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+          Origin: "https://evil.invalid",
+        },
+        body: JSON.stringify(ping()),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(env.PINGS.rows).toEqual([]);
+  });
+
   it("rejects a body over 1024 bytes", async () => {
     const env = makeEnv();
     // Valid in every way except its size: the padding is leading whitespace,

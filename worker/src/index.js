@@ -307,6 +307,12 @@ export function makeHandler({ fetch, now }) {
   async function handlePing(request, env) {
     if (request.method !== "POST") return methodNotAllowed("POST");
 
+    // Browsers attach Origin to every cross-origin POST, and a text/plain body
+    // skips the preflight, so without this any web page could turn its
+    // visitors into heartbeat writers. URLSession sends no Origin, so a real
+    // heartbeat is unaffected.
+    if (request.headers.has("origin")) return badRequest();
+
     // The kill switch stops collection without touching /download, and answers
     // before the body is read so a flood costs nothing. The app cannot tell
     // this apart from an accepted heartbeat, which is the point: it must not
