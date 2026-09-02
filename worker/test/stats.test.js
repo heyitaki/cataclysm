@@ -26,12 +26,17 @@ const weekOf = (iso) => epoch(iso) / WEEK;
 const W0 = weekOf("2026-08-20");
 const W1 = weekOf("2026-08-27");
 
+// The script's clock is pinned so the fixture dates stay inside its 90-day
+// window; 2026-09-02 puts the window's first full week at 2026-06-04.
+const NOW = String(epoch("2026-09-02"));
+
 const A = "aaaaaaaa-0000-4000-8000-000000000001";
 const B = "bbbbbbbb-0000-4000-8000-000000000002";
 const C = "cccccccc-0000-4000-8000-000000000003";
 const D = "dddddddd-0000-4000-8000-000000000004";
 const E = "eeeeeeee-0000-4000-8000-000000000005";
 const F = "ffffffff-0000-4000-8000-000000000006";
+const G = "gggggggg-0000-4000-8000-000000000007";
 
 const rows = (data) => ({ status: 200, body: { data } });
 const error = (status, message) => ({ status, body: { errors: [{ message }] } });
@@ -105,7 +110,7 @@ Weekly active installs (last 90 days, weeks start Thursday)
 Cursor lock share (last 7 days, weighted by heartbeat)
   1 of 3 heartbeats with the cursor lock on (33%)
 
-Weekly cohort retention (cohort = install date, share still active)
+Weekly cohort retention (cohorts of the last 90 days, share still active)
   cohort      size    w0    w1
   2026-08-20     2  100%   50%
   2026-08-27     2   50%     -
@@ -149,7 +154,13 @@ afterEach(() => {
 function run(args = [], env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("bash", [SCRIPT, ...args], {
-      env: { ...process.env, CLOUDFLARE_API_TOKEN: TOKEN, STATS_API_URL: apiUrl, ...env },
+      env: {
+        ...process.env,
+        CLOUDFLARE_API_TOKEN: TOKEN,
+        STATS_API_URL: apiUrl,
+        STATS_NOW: NOW,
+        ...env,
+      },
     });
     let stdout = "";
     let stderr = "";
@@ -171,6 +182,49 @@ describe("stats.sh", () => {
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(FULL_REPORT);
+  });
+
+  it("drops cohorts older than the window instead of widening the table", async () => {
+    // G was installed two years ago and is still pinging. Its heartbeats are
+    // inside the window, so the SQL returns it, but its cohort is not.
+    server.respond = (sql) => {
+      const { status, body } = fullReport(sql);
+      if (sql.includes("min(blob2) AS created")) {
+        body.data.push({ install: G, created: "2024-09-05" });
+      }
+      if (sql.includes("GROUP BY install, week")) {
+        body.data.push({ install: G, week: W1 });
+      }
+      return { status, body };
+    };
+
+    const result = await run();
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(FULL_REPORT);
+  });
+
+  it("keeps a cohort that starts on the window's first full week", async () => {
+    // 2026-06-04 is the first Thursday inside the 90-day window that ends on
+    // NOW; the week before it is partly outside and must not appear.
+    const W_EDGE = weekOf("2026-06-04");
+    server.respond = (sql) => {
+      const { status, body } = fullReport(sql);
+      if (sql.includes("min(blob2) AS created")) {
+        body.data.push({ install: G, created: "2026-06-04" });
+        body.data.push({ install: D, created: "2026-06-03" });
+      }
+      if (sql.includes("GROUP BY install, week")) {
+        body.data.push({ install: G, week: W_EDGE });
+      }
+      return { status, body };
+    };
+
+    const result = await run();
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("  2026-06-04     1  100%     -\n");
+    expect(result.stdout).not.toContain("2026-05-28");
   });
 
   it("sends the token as a bearer header on every request", async () => {

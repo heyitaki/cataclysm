@@ -34,6 +34,14 @@ readonly JAIL_WINDOW_DAYS=7
 readonly DAY=86400
 readonly WEEK=604800
 
+# STATS_NOW (epoch seconds) is the test seam that pins the clock so fixture
+# dates stay inside the window.
+readonly NOW="${STATS_NOW:-$(date +%s)}"
+# The first week that lies entirely inside the retention window. A cohort
+# created earlier than this has installs whose heartbeats may already have
+# aged out of the dataset, so its size would count survivors only.
+readonly OLDEST_COHORT_WEEK=$(( (NOW - WINDOW_DAYS * DAY + WEEK - 1) / WEEK ))
+
 # Every pings query carries both: the retention window and the probe exclusion.
 readonly PINGS_WHERE="timestamp > NOW() - INTERVAL '${WINDOW_DAYS}' DAY AND index1 != '${PROBE_INSTALL}'"
 readonly DOWNLOADS_WHERE="timestamp > NOW() - INTERVAL '${WINDOW_DAYS}' DAY"
@@ -174,15 +182,20 @@ run_query "SELECT double2 AS jail, sum(_sample_interval) AS pings FROM ${PINGS_T
 cohorts="$(run_query "SELECT index1 AS install, min(blob2) AS created FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY install")"
 actives="$(run_query "SELECT index1 AS install, intDiv(toUnixTimestamp(timestamp), ${WEEK}) AS week FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY install, week")"
 
-section "Weekly cohort retention (cohort = install date, share still active)"
-jq -rn --argjson cohorts "$cohorts" --argjson actives "$actives" --argjson week "$WEEK" '
+# The SQL window bounds heartbeats, not the install-created date, so a veteran
+# install still pinging today would otherwise open a cohort years back, widen
+# every row to reach it, and count only the survivors of its cohort. Cohorts
+# older than the window are dropped here instead.
+section "Weekly cohort retention (cohorts of the last ${WINDOW_DAYS} days, share still active)"
+jq -rn --argjson cohorts "$cohorts" --argjson actives "$actives" --argjson week "$WEEK" --argjson oldest "$OLDEST_COHORT_WEEK" '
   def pad(n): tostring | if length >= n then . else (" " * (n - length)) + . end;
   def week_of_date: (. + "T00:00:00Z" | fromdateiso8601) / $week | floor;
   def week_label: (. * $week) | todate[0:10];
 
   ($cohorts
     | map(select(.created != null and (.created | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))))
-    | map({ install: .install, cw: (.created | week_of_date) })) as $installs
+    | map({ install: .install, cw: (.created | week_of_date) })
+    | map(select(.cw >= $oldest))) as $installs
   | if ($installs | length) == 0 then "  (no installs yet)"
     else
       ($installs | INDEX(.install) | map_values(.cw)) as $cohort_of
