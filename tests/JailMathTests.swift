@@ -174,18 +174,25 @@ struct JailMathTests {
         // whatever the close button read said.
         let bare = jailClamp(mode: .borderless, frame: frame, closeButton: closeButton,
                              cornerRadius: 18)
-        checkEq(bare?.rect, frame.insetBy(dx: inset, dy: inset), "borderless keeps the whole frame")
+        checkEq(bare?.rect, CGRect(x: 641, y: 361, width: 1918, height: 1078),
+                "borderless keeps the whole frame less the inset")
         checkEq(bare?.topRadius, 0, "borderless has no top arcs")
         checkEq(bare?.bottomRadius, 0, "borderless has no bottom arcs")
         // Windowed: the close button measures a 24 point bar (12 + 2*6), which
         // comes off the top; the radius applies, shrunk at the top by the bar.
         let chrome = jailClamp(mode: .windowed, frame: frame, closeButton: closeButton,
                                cornerRadius: 18)
-        checkEq(chrome?.rect, CGRect(x: 640, y: 384, width: 1920, height: 1056)
-                    .insetBy(dx: inset, dy: inset),
+        checkEq(chrome?.rect, CGRect(x: 641, y: 385, width: 1918, height: 1054),
                 "windowed carves out the title bar")
         checkEq(chrome?.bottomRadius, 18, "windowed keeps the corner radius")
-        checkEq(chrome?.topRadius, 0, "windowed shrinks the top arcs by the bar")
+        checkEq(chrome?.topRadius, 0, "windowed zeroes top arcs under the bar")
+        // A radius past the bar keeps the difference at the top: a 30 point
+        // bar (14 + 2*8) off a 60 point radius.
+        let deep = jailClamp(mode: .windowed, frame: frame,
+                             closeButton: CGRect(x: 648, y: 368, width: 14, height: 14),
+                             cornerRadius: 60)
+        checkEq(deep?.topRadius, 30, "windowed shrinks the top arcs by the bar")
+        checkEq(deep?.bottomRadius, 60, "windowed keeps the bottom radius")
         // A frame too thin to inset yields nothing rather than CGRect.null.
         check(jailClamp(mode: .borderless, frame: CGRect(x: 0, y: 0, width: 1, height: 100),
                         closeButton: nil, cornerRadius: 18) == nil,

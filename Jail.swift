@@ -8,6 +8,12 @@ import Cocoa
 // several. Unbounded calls into a stalled game would freeze the cursor via
 // tap timeout.
 let axTimeout: Float = 0.05
+// Installed once, on first use. The timeout is per element (AXUIElement.h),
+// and an element without its own uses the process-global one, so the
+// system-wide set covers every window and button fetched later.
+private let axTimeoutInstalled: Bool = {
+    AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), axTimeout) == .success
+}()
 // The window's native-fullscreen state. Undocumented (the SDK only names the
 // button, kAXFullScreenButtonAttribute) but what AppKit answers and window
 // managers read.
@@ -28,58 +34,80 @@ var jailEnabled = true
 var pendingWarp = CGPoint.zero
 
 // One attribute read with the failure kinds the callers need apart: missing
-// (the window has no such attribute) is a fact about the window, failed (a
-// timeout under load, the element gone) says nothing about it.
-enum AXRead {
-    case value(CFTypeRef), missing, failed
+// (the window has no such attribute, or answers it with the wrong type) is a
+// fact about the window, failed (a timeout under load, the element gone) says
+// nothing about it.
+enum AXRead<Value> {
+    case value(Value), missing, failed
 
     var failed: Bool {
         if case .failed = self { return true }
         return false
     }
 
-    var element: AXUIElement? {
-        guard case .value(let v) = self, CFGetTypeID(v) == AXUIElementGetTypeID() else { return nil }
-        return (v as! AXUIElement)
+    var payload: Value? {
+        if case .value(let v) = self { return v }
+        return nil
     }
 
-    var string: String? {
-        guard case .value(let v) = self else { return nil }
-        return v as? String
+    // nil from the transform is a wrong-typed answer: missing.
+    func compactMap<T>(_ transform: (Value) -> T?) -> AXRead<T> {
+        flatMap { transform($0).map { .value($0) } ?? .missing }
     }
 
-    // NSNumber bridges any number to Bool, so the CFBoolean type is checked
-    // explicitly (same rule as the settings reads).
-    var bool: Bool {
-        guard case .value(let v) = self, CFGetTypeID(v) == CFBooleanGetTypeID() else { return false }
-        return CFBooleanGetValue((v as! CFBoolean))
+    func flatMap<T>(_ transform: (Value) -> AXRead<T>) -> AXRead<T> {
+        switch self {
+        case .value(let v): return transform(v)
+        case .missing: return .missing
+        case .failed: return .failed
+        }
     }
 }
 
-func axRead(_ el: AXUIElement, _ attribute: String) -> AXRead {
+// notImplemented ("the process does not fully support the accessibility
+// API") is permanent, so it counts as missing: as a failure it would keep the
+// jail from ever engaging on such a process.
+func axRead(_ el: AXUIElement, _ attribute: String) -> AXRead<CFTypeRef> {
     var ref: CFTypeRef?
     switch AXUIElementCopyAttributeValue(el, attribute as CFString, &ref) {
     case .success: return ref.map { .value($0) } ?? .missing
-    case .noValue, .attributeUnsupported: return .missing
+    case .noValue, .attributeUnsupported, .notImplemented: return .missing
     default: return .failed
     }
 }
 
-func axElement(_ parent: AXUIElement, _ attribute: String) -> AXUIElement? {
-    axRead(parent, attribute).element
+func axElement(_ el: AXUIElement, _ attribute: String) -> AXRead<AXUIElement> {
+    axRead(el, attribute).compactMap {
+        CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil
+    }
 }
 
-func axRect(_ el: AXUIElement) -> CGRect? {
-    var posRef: CFTypeRef?
-    var sizeRef: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posRef) == .success,
-          AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeRef) == .success,
-          let posVal = posRef, let sizeVal = sizeRef else { return nil }
-    var pos = CGPoint.zero
+func axString(_ el: AXUIElement, _ attribute: String) -> AXRead<String> {
+    axRead(el, attribute).compactMap { $0 as? String }
+}
+
+// Any number counts (a non-AppKit AX server may answer 0/1), so this is
+// looser than the settings reads, which reject numbers for bool keys.
+func axBool(_ el: AXUIElement, _ attribute: String) -> AXRead<Bool> {
+    axRead(el, attribute).compactMap { ($0 as? NSNumber)?.boolValue }
+}
+
+func axPoint(_ ref: CFTypeRef) -> CGPoint? {
+    guard CFGetTypeID(ref) == AXValueGetTypeID() else { return nil }
+    var point = CGPoint.zero
+    return AXValueGetValue((ref as! AXValue), .cgPoint, &point) ? point : nil
+}
+
+func axSize(_ ref: CFTypeRef) -> CGSize? {
+    guard CFGetTypeID(ref) == AXValueGetTypeID() else { return nil }
     var size = CGSize.zero
-    guard AXValueGetValue(posVal as! AXValue, .cgPoint, &pos),
-          AXValueGetValue(sizeVal as! AXValue, .cgSize, &size) else { return nil }
-    return CGRect(origin: pos, size: size)
+    return AXValueGetValue((ref as! AXValue), .cgSize, &size) ? size : nil
+}
+
+func axRect(_ el: AXUIElement) -> AXRead<CGRect> {
+    axRead(el, kAXPositionAttribute).compactMap(axPoint).flatMap { origin in
+        axRead(el, kAXSizeAttribute).compactMap(axSize).compactMap { CGRect(origin: origin, size: $0) }
+    }
 }
 
 // In the AX (top-left origin) coordinate space; empty when CG refuses, which
@@ -99,27 +127,34 @@ enum GameWindow {
 }
 
 func gameWindow(_ app: NSRunningApplication) -> GameWindow {
+    _ = axTimeoutInstalled
     let ax = AXUIElementCreateApplication(app.processIdentifier)
-    AXUIElementSetMessagingTimeout(ax, axTimeout)
-    guard let winEl = axElement(ax, kAXFocusedWindowAttribute)
-        ?? axElement(ax, kAXMainWindowAttribute) else { return .unreadable }
-    guard let rect = axRect(winEl) else { return .unreadable }
+    // Only a window that is missing (not one that timed out) falls back to
+    // the main window: a stalled read says nothing about which is focused.
+    let focused = axElement(ax, kAXFocusedWindowAttribute)
+    guard !focused.failed,
+          let winEl = focused.payload ?? axElement(ax, kAXMainWindowAttribute).payload,
+          let rect = axRect(winEl).payload else { return .unreadable }
     // A chrome or fullscreen read that failed must not pass as absent: absent
     // chrome drops the title-bar exclusion, and an absent flag engages over
-    // native fullscreen. A window without the attribute answers missing, which
-    // is absent for real (borderless answers AXUnknown for the subrole).
-    let subrole = axRead(winEl, kAXSubroleAttribute)
-    let fullScreen = axRead(winEl, axFullScreenAttribute)
-    let closeButton = axRead(winEl, kAXCloseButtonAttribute)
+    // native fullscreen. A window without the attribute (or answering it with
+    // another type) is missing, which is absent for real: borderless answers
+    // AXUnknown for the subrole.
+    let subrole = axString(winEl, kAXSubroleAttribute)
+    let fullScreen = axBool(winEl, axFullScreenAttribute)
+    let closeButton = axElement(winEl, kAXCloseButtonAttribute)
     guard !subrole.failed, !fullScreen.failed, !closeButton.failed else { return .unreadable }
     let mode = windowMode(
-        standardWindow: subrole.string == kAXStandardWindowSubrole,
-        hasCloseButton: closeButton.element != nil,
-        fullScreen: fullScreen.bool,
+        standardWindow: subrole.payload == kAXStandardWindowSubrole,
+        hasCloseButton: closeButton.payload != nil,
+        fullScreen: fullScreen.payload ?? false,
         frame: rect, displays: activeDisplayBounds())
     if mode == .fullscreen { return .fullscreen }
-    guard let clamp = jailClamp(mode: mode, frame: rect,
-                                closeButton: closeButton.element.flatMap(axRect),
+    // Only the title-bar measurement needs the button's rect, so it is read
+    // after the fullscreen decision.
+    let buttonRect = closeButton.flatMap(axRect)
+    guard !buttonRect.failed,
+          let clamp = jailClamp(mode: mode, frame: rect, closeButton: buttonRect.payload,
                                 cornerRadius: cornerRadius) else { return .unreadable }
     return .clamp(clamp)
 }
@@ -142,7 +177,7 @@ func setEngaged(_ on: Bool) {
     }
 }
 
-func release() {
+func releaseJail() {
     clampArea = nil
     setEngaged(false)
 }
@@ -153,7 +188,7 @@ func refresh() {
     // failed despite trust) that would freeze the cursor outright.
     guard jailEnabled, tap != nil,
           let front = NSWorkspace.shared.frontmostApplication,
-          front.bundleIdentifier == gameBundle else { return release() }
+          front.bundleIdentifier == gameBundle else { return releaseJail() }
     switch gameWindow(front) {
     case .clamp(let c):
         clampArea = c
@@ -162,7 +197,7 @@ func refresh() {
         // it escape.
         break
     case .fullscreen:
-        return release()
+        return releaseJail()
     }
     guard let area = clampArea else { return }
     setEngaged(true)

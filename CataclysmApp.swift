@@ -372,10 +372,9 @@ final class AppRuntime {
         }
         stopTap()
         stopScrollTap()
-        clampArea = nil
-        setEngaged(false)
-        // setEngaged(false) only re-associates from the engaged state; make
-        // the release unconditional.
+        releaseJail()
+        // releaseJail only re-associates from the engaged state; make the
+        // release unconditional.
         CGAssociateMouseAndMouseCursorPosition(1)
         state.jailTapUp = false
         state.scrollTapUp = false
