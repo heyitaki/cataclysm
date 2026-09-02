@@ -84,6 +84,16 @@ struct SettingsTests {
         checkEq(s.hotkeyModifiers, 0x0100 | 0x0800, "default: hotkey cmd+alt")
         checkEq(s.launchAtLogin, true, "default: launch at login")
         check(s.lastRegisteredVersion == nil, "default: no registered version")
+        checkEq(s.telemetryEnabled, true, "default: usage stats on")
+        check(s.telemetryInstallID == nil, "default: no install id")
+        check(s.telemetryInstallCreated == nil, "default: no install date")
+        check(s.telemetryLastAttempt == nil, "default: no ping attempt")
+        check(Settings.Key.all.contains(Settings.Key.telemetryEnabled),
+              "telemetry switch is a preference")
+        check(!Settings.Key.all.contains(Settings.Key.telemetryInstallID)
+              && !Settings.Key.all.contains(Settings.Key.telemetryInstallCreated)
+              && !Settings.Key.all.contains(Settings.Key.telemetryLastAttempt),
+              "telemetry bookkeeping is not a preference")
 
         check(Settings.Key.all.allSatisfy { !$0.hasPrefix("recovery.") },
               "no recovery. key is a preference")
@@ -153,6 +163,25 @@ struct SettingsTests {
         checkEq(s.altTrackpadDetection, false, "bool: stored number falls back")
         store.set(true, forKey: Settings.Key.cornerRadius)
         checkEq(s.cornerRadius, 18.0, "double: stored boolean falls back")
+
+        // Telemetry round trips; wrong types read as absent or default.
+        s.telemetryEnabled = false
+        checkEq(s.telemetryEnabled, false, "telemetry: switch round trips")
+        store.set("no", forKey: Settings.Key.telemetryEnabled)
+        checkEq(s.telemetryEnabled, true, "telemetry: string switch falls back")
+        s.telemetryLastAttempt = 1_756_800_000
+        checkEq(s.telemetryLastAttempt, 1_756_800_000, "telemetry: attempt round trips")
+        store.set("later", forKey: Settings.Key.telemetryLastAttempt)
+        check(s.telemetryLastAttempt == nil, "telemetry: string attempt reads as never")
+        store.set(Double.nan, forKey: Settings.Key.telemetryLastAttempt)
+        check(s.telemetryLastAttempt == nil, "telemetry: NaN attempt reads as never")
+        s.telemetryLastAttempt = nil
+        check(store.object(forKey: Settings.Key.telemetryLastAttempt) == nil,
+              "telemetry: nil attempt removes the key")
+        s.telemetryInstallID = "abc"
+        checkEq(s.telemetryInstallID, "abc", "telemetry: install id round trips")
+        store.set("", forKey: Settings.Key.telemetryInstallID)
+        check(s.telemetryInstallID == nil, "telemetry: empty install id reads as absent")
 
         // Setters clamp before persisting.
         s.linesPerNotch = 0
@@ -228,6 +257,10 @@ struct SettingsTests {
         s.linesPerNotch = 7
         s.targetBundleID = "com.example.game"
         s.lastRegisteredVersion = "0.9.0"
+        s.telemetryEnabled = false
+        s.telemetryInstallID = "0f0f0f0f-0000-4000-8000-000000000001"
+        s.telemetryInstallCreated = "2026-09-02"
+        s.telemetryLastAttempt = 1_756_800_000
         store.set(196_608, forKey: recoveryKey)
         store.set("keep", forKey: "future.unknownKey")
 
@@ -248,6 +281,13 @@ struct SettingsTests {
                 "reset: spares recovery original")
         checkEq(store.string(forKey: "future.unknownKey"), "keep",
                 "reset: leaves unknown keys untouched")
+        // The switch is a preference (a reset turns the heartbeat back on);
+        // the install identity and the attempt gate are bookkeeping and stay.
+        checkEq(s.telemetryEnabled, true, "reset: usage stats back on")
+        checkEq(s.telemetryInstallID, "0f0f0f0f-0000-4000-8000-000000000001",
+                "reset: spares install id")
+        checkEq(s.telemetryInstallCreated, "2026-09-02", "reset: spares install date")
+        checkEq(s.telemetryLastAttempt, 1_756_800_000, "reset: spares ping attempt")
 
         // The nil setter removes the key directly; resetToDefaults reaches
         // the same state through removeObject, bypassing the setter.

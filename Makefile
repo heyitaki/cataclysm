@@ -8,7 +8,7 @@ APP = build/Cataclysm.app
 .DELETE_ON_ERROR:
 
 # Explicit source list; a *.swift glob would silently pick up any stray file.
-APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift JailMath.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift MenuBarIcon.swift
+APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift JailMath.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift MenuBarIcon.swift Telemetry.swift
 
 # Extra codesign flags (e.g. --timestamp); local builds stay offline-friendly
 # without any.
@@ -100,7 +100,7 @@ build/Cataclysm.icns: build/icon-1024.png
 # typecheck first: the unit harnesses link only the pure modules, so without
 # it a rename in app-only code leaves `make test` green while `make app`
 # breaks for the next builder.
-test: typecheck build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/smoke-tests build/jailmath-tests
+test: typecheck build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/smoke-tests build/jailmath-tests build/telemetry-tests
 	./build/scrollfilter-tests
 	./build/settings-tests
 	./build/startup-tests
@@ -110,6 +110,7 @@ test: typecheck build/scrollfilter-tests build/settings-tests build/startup-test
 	./build/watcher-tests
 	./build/smoke-tests
 	./build/jailmath-tests
+	./build/telemetry-tests
 
 # Whole-app compile check without linking, lipo, or signing. Same macOS 13
 # target as the real build, so an API newer than the floor fails here and
@@ -154,6 +155,12 @@ build/smoke-tests: Smoke.swift tests/SmokeTests.swift
 build/jailmath-tests: JailMath.swift tests/JailMathTests.swift
 	mkdir -p build
 	xcrun swiftc -O JailMath.swift tests/JailMathTests.swift -o $@
+
+# Telemetry reads its switch and bookkeeping through Settings, so the harness
+# links the store and the two modules it depends on.
+build/telemetry-tests: Telemetry.swift Settings.swift ScrollFilter.swift Hotkey.swift tests/TelemetryTests.swift
+	mkdir -p build
+	xcrun swiftc -O Telemetry.swift Settings.swift ScrollFilter.swift Hotkey.swift tests/TelemetryTests.swift -o $@
 
 DMG = build/Cataclysm-$(VERSION).dmg
 STABLE_DMG = build/Cataclysm.dmg

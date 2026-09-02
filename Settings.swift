@@ -33,16 +33,28 @@ final class Settings {
         static let hotkeyModifiers = "hotkey.modifiers"
         static let launchAtLogin = "app.launchAtLogin"
         static let lastRegisteredVersion = "app.lastRegisteredVersion"
+        static let telemetryEnabled = "telemetry.enabled"
 
-        // Everything resetToDefaults() erases. recovery.-prefixed keys and
-        // lastRegisteredVersion are bookkeeping, not preferences: erasing
-        // the version would force a needless watcher re-register cycle with
-        // its 10s uncovered probe window on the next launch.
+        // Telemetry bookkeeping (Telemetry.swift), outside Key.all on purpose.
+        // The install id and its created date are the heartbeat's identity:
+        // a reset that minted a new id would count one Mac as two installs
+        // and drop it out of its retention cohort. lastAttempt is the cadence
+        // gate; erasing it would send an extra heartbeat right after a reset.
+        static let telemetryInstallID = "telemetry.installID"
+        static let telemetryInstallCreated = "telemetry.installCreated"
+        static let telemetryLastAttempt = "telemetry.lastAttempt"
+
+        // Everything resetToDefaults() erases. recovery.-prefixed keys,
+        // lastRegisteredVersion and the telemetry.* bookkeeping above are
+        // not preferences: erasing the version would force a needless
+        // watcher re-register cycle with its 10s uncovered probe window on
+        // the next launch. telemetryEnabled is a preference, so a reset
+        // turns the heartbeat back on for a user who had switched it off.
         static let all = [
             enabled, jailEnabled, targetBundleID, targetDisplayName, cornerRadius,
             accelerationOff, invertVertical, invertHorizontal, flattenNotches,
             linesPerNotch, mulThousandths, altTrackpadDetection,
-            hotkeyKeyCode, hotkeyModifiers, launchAtLogin,
+            hotkeyKeyCode, hotkeyModifiers, launchAtLogin, telemetryEnabled,
         ]
     }
 
@@ -100,11 +112,23 @@ final class Settings {
         return value
     }
 
-    private func nonEmptyString(_ key: String, or fallback: String) -> String {
-        guard let value = defaults.string(forKey: key), !value.isEmpty else {
-            return fallback
-        }
+    private func nonEmptyOptional(_ key: String) -> String? {
+        guard let value = defaults.string(forKey: key), !value.isEmpty else { return nil }
         return value
+    }
+
+    private func nonEmptyString(_ key: String, or fallback: String) -> String {
+        nonEmptyOptional(key) ?? fallback
+    }
+
+    // Optional bookkeeping values: nil removes the key rather than storing a
+    // null, so "absent" has one representation.
+    private func setOrRemove(_ value: Any?, forKey key: String) {
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     // MARK: - Preferences
@@ -207,13 +231,38 @@ final class Settings {
     // a mismatch with the running build triggers unregister-then-re-register.
     var lastRegisteredVersion: String? {
         get { defaults.string(forKey: Key.lastRegisteredVersion) }
-        set {
-            if let newValue {
-                defaults.set(newValue, forKey: Key.lastRegisteredVersion)
-            } else {
-                defaults.removeObject(forKey: Key.lastRegisteredVersion)
-            }
+        set { setOrRemove(newValue, forKey: Key.lastRegisteredVersion) }
+    }
+
+    // MARK: - Telemetry
+
+    // Heartbeat opt-out. On by default and not exposed in the dropdown; a
+    // `defaults write` of telemetry.enabled to false is the only way to turn
+    // it off.
+    var telemetryEnabled: Bool {
+        get { bool(Key.telemetryEnabled, or: true) }
+        set { defaults.set(newValue, forKey: Key.telemetryEnabled) }
+    }
+
+    // Heartbeat bookkeeping owned by Telemetry.swift; this store only
+    // persists it. nil means never minted (id, created) or never attempted.
+    var telemetryInstallID: String? {
+        get { nonEmptyOptional(Key.telemetryInstallID) }
+        set { setOrRemove(newValue, forKey: Key.telemetryInstallID) }
+    }
+
+    var telemetryInstallCreated: String? {
+        get { nonEmptyOptional(Key.telemetryInstallCreated) }
+        set { setOrRemove(newValue, forKey: Key.telemetryInstallCreated) }
+    }
+
+    // Epoch seconds of the last ping attempt; a wrong type reads as never.
+    var telemetryLastAttempt: Double? {
+        get {
+            let value = finiteDouble(Key.telemetryLastAttempt, or: .nan)
+            return value.isFinite ? value : nil
         }
+        set { setOrRemove(newValue, forKey: Key.telemetryLastAttempt) }
     }
 
     // Per-axis snapshots for the scroll tap; flatten, lines, and multiplier
