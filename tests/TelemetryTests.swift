@@ -163,6 +163,12 @@ struct TelemetryTests {
         // one: the heartbeat waits rather than doubling up.
         s.telemetryLastAttempt = now.addingTimeInterval(5 * hour).timeIntervalSince1970
         check(!t.isEligible(now: now), "eligible: future attempt waits")
+        // A stamp a whole interval or more ahead came from a wrong clock and
+        // must not silence the heartbeat until real time catches up.
+        s.telemetryLastAttempt = now.addingTimeInterval(20 * hour).timeIntervalSince1970
+        check(t.isEligible(now: now), "eligible: attempt a full interval ahead")
+        s.telemetryLastAttempt = now.addingTimeInterval(400 * 24 * hour).timeIntervalSince1970
+        check(t.isEligible(now: now), "eligible: attempt a year ahead")
 
         s.telemetryLastAttempt = nil
         check(t.isEligible(now: now), "eligible: cleared attempt")

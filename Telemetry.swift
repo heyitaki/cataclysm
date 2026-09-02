@@ -63,12 +63,15 @@ final class Telemetry {
 
     // MARK: - Cadence
 
-    // An attempt in the future (clock set backwards) reads as recent, so the
-    // heartbeat waits instead of doubling up.
+    // An attempt slightly in the future (clock set backwards) reads as recent,
+    // so the heartbeat waits instead of doubling up. One further ahead than a
+    // whole interval was stamped by a wrong clock; waiting it out could mean
+    // months of silence, so it is treated as stale instead.
     func isEligible(now: Date) -> Bool {
         guard settings.telemetryEnabled else { return false }
         guard let last = settings.telemetryLastAttempt else { return true }
-        return now.timeIntervalSince1970 - last >= Telemetry.minimumInterval
+        let elapsed = now.timeIntervalSince1970 - last
+        return elapsed >= Telemetry.minimumInterval || elapsed <= -Telemetry.minimumInterval
     }
 
     // MARK: - Request

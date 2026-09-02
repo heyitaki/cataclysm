@@ -140,21 +140,21 @@ assert_no_sampling "$DOWNLOADS_TABLE" "$DOWNLOADS_WHERE"
 assert_no_sampling "$PINGS_TABLE" "$PINGS_WHERE"
 
 section "Downloads per day (last ${WINDOW_DAYS} days)"
-run_query "SELECT intDiv(toUInt32(timestamp), ${DAY}) AS day, sum(_sample_interval) AS downloads FROM ${DOWNLOADS_TABLE} WHERE ${DOWNLOADS_WHERE} GROUP BY day ORDER BY day ASC" \
+run_query "SELECT intDiv(toUnixTimestamp(timestamp), ${DAY}) AS day, sum(_sample_interval) AS downloads FROM ${DOWNLOADS_TABLE} WHERE ${DOWNLOADS_WHERE} GROUP BY day ORDER BY day ASC" \
   | jq -r --argjson day "$DAY" '
       if length == 0 then "  (none)"
       else .[] | "  \((.day | tonumber) * $day | todate[0:10])  \(.downloads)"
       end'
 
 section "Daily active installs (last ${WINDOW_DAYS} days)"
-run_query "SELECT intDiv(toUInt32(timestamp), ${DAY}) AS day, count(DISTINCT index1) AS installs FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY day ORDER BY day ASC" \
+run_query "SELECT intDiv(toUnixTimestamp(timestamp), ${DAY}) AS day, count(DISTINCT index1) AS installs FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY day ORDER BY day ASC" \
   | jq -r --argjson day "$DAY" '
       if length == 0 then "  (none)"
       else .[] | "  \((.day | tonumber) * $day | todate[0:10])  \(.installs)"
       end'
 
 section "Weekly active installs (last ${WINDOW_DAYS} days, weeks start Thursday)"
-run_query "SELECT intDiv(toUInt32(timestamp), ${WEEK}) AS week, count(DISTINCT index1) AS installs FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY week ORDER BY week ASC" \
+run_query "SELECT intDiv(toUnixTimestamp(timestamp), ${WEEK}) AS week, count(DISTINCT index1) AS installs FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY week ORDER BY week ASC" \
   | jq -r --argjson week "$WEEK" '
       if length == 0 then "  (none)"
       else .[] | "  \((.week | tonumber) * $week | todate[0:10])  \(.installs)"
@@ -172,7 +172,7 @@ run_query "SELECT double2 AS jail, sum(_sample_interval) AS pings FROM ${PINGS_T
 # Retention needs both halves of the join, so both queries run even when the
 # first comes back empty; that also keeps --dry-run printing every statement.
 cohorts="$(run_query "SELECT index1 AS install, min(blob2) AS created FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY install")"
-actives="$(run_query "SELECT index1 AS install, intDiv(toUInt32(timestamp), ${WEEK}) AS week FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY install, week")"
+actives="$(run_query "SELECT index1 AS install, intDiv(toUnixTimestamp(timestamp), ${WEEK}) AS week FROM ${PINGS_TABLE} WHERE ${PINGS_WHERE} GROUP BY install, week")"
 
 section "Weekly cohort retention (cohort = install date, share still active)"
 jq -rn --argjson cohorts "$cohorts" --argjson actives "$actives" --argjson week "$WEEK" '
