@@ -10,13 +10,15 @@ The cursor fix is the capture technique virtual machines use: the hardware mouse
 
 Needs macOS 13 (Ventura) or later; works on both Apple silicon and Intel Macs.
 
-1. Download `Cataclysm-x.y.z.dmg` from the [releases page](https://github.com/heyitaki/cataclysm/releases) and open it.
+1. Download Cataclysm from [akshath.me/cataclysm](https://akshath.me/cataclysm) and open the image.
 2. Drag `Cataclysm` onto the `Applications` shortcut next to it, then eject the image.
-3. Open Cataclysm from Applications. macOS will refuse the first launch with a malware warning, because the app is not notarized by Apple. That is expected:
-   - Close the warning.
-   - Open System Settings, go to Privacy & Security, and scroll down: you'll see a line saying Cataclysm was blocked, with an **Open Anyway** button. Click it and confirm.
-   - This is needed once. After that it opens like any other app.
-4. Cataclysm asks for the Accessibility permission on first run and walks you through granting it. It needs Accessibility to see mouse events; nothing works until it's granted.
+3. Open Cataclysm from Applications. macOS refuses the first launch: Cataclysm is not enrolled in Apple's paid developer program, so macOS cannot check it against Apple's records. Nothing was detected in the app; the warning only says Apple has not looked at it. You go through these steps once per Mac, and after that Cataclysm opens like any other app:
+   1. The dialog "Cataclysm" Not Opened appears, saying Apple could not verify it is free of malware. Click Done.
+   2. Open System Settings, go to Privacy & Security, and scroll down to Security. A line says Cataclysm was blocked. Click **Open Anyway**.
+   3. A dialog titled Open "Cataclysm"? appears with Move to Trash, Open Anyway and Done. Click Open Anyway.
+   4. Enter an administrator name and password.
+   - On macOS 13 and 14 the route is shorter: right-click (or Control-click) Cataclysm in Applications, choose Open, then click Open again in the dialog.
+4. Cataclysm asks for the Accessibility permission on first run and walks you through granting it in System Settings > Privacy & Security > Accessibility. It needs Accessibility to see mouse events; nothing works until it is granted.
 
 Look for the Cataclysm icon in the menu bar. The switch beside the title in the dropdown turns every feature off and back on at once, and the icon shows a dotted ring while it is off. Below it are the individual switches, the application picker, and a scroll speed slider. The rest is under Advanced.
 
@@ -38,9 +40,13 @@ Cataclysm clamps and rewrites your own mouse input: it keeps the cursor inside t
 
 Open the dropdown, turn off "Launch at login", and click "Quit Cataclysm". Quitting restores your mouse acceleration and reconnects the cursor. Then drag Cataclysm from Applications to the Trash, and remove any leftover Cataclysm entry under System Settings > General > Login Items. If a file named `io.github.heyitaki.cataclysm.watch.plist` exists in `~/Library/LaunchAgents` (some installs use it for crash recovery), run `launchctl bootout gui/$(id -u)/io.github.heyitaki.cataclysm.watch` and delete the file.
 
+## Privacy
+
+Once a day, Cataclysm sends one small heartbeat to `akshath.me/cataclysm/ping` so I can see how many installs are alive and whether they keep working. It contains exactly these fields: a random install id (generated once, stored in the app's preferences), the install date, the app version, the macOS version, the CPU architecture (`arm64` or `x86_64`), whether the app is enabled, and whether the cursor lock is enabled. It deliberately does not send the name of the game or any other app, and the receiving server does not store your IP address. The heartbeat is on by default. To turn it off, run `defaults write io.github.heyitaki.cataclysm telemetry.enabled -bool false`. Note that "Reset to defaults" under Advanced turns it back on along with every other setting. The server side is the Cloudflare Worker in [`worker/`](worker/), so you can read exactly what is stored.
+
 ## Building from source
 
-Needs the Xcode command line tools. `make` builds `build/Cataclysm.app`; `make test` runs the tests; `make dmg VERSION=x.y.z` produces the installer image. `make release VERSION=x.y.z IDENTITY="Developer ID Application: <name> (<team>)" NOTARY_PROFILE=<profile>` builds, notarizes, and staples the DMG; it needs an Apple Developer ID, and without one releases ship straight from `make dmg`. For tuning, running the bundled binary with `--dump-scroll` logs each raw scroll event and the filter's decision to stdout.
+Needs the Xcode command line tools. `make` builds `build/Cataclysm.app`; `make test` runs the tests. `make dmg VERSION=x.y.z` produces three of the four release assets: `Cataclysm-x.y.z.dmg` (the installer image, unsigned, with the signed app inside), `Cataclysm.dmg` (a byte-identical copy under a version-stable name) and `Cataclysm-x.y.z.zip` (the updater's archive). The fourth, `appcast.xml`, is the updater's feed and is built separately. For tuning, running the bundled binary with `--dump-scroll` logs each raw scroll event and the filter's decision to stdout.
 
 ## License
 

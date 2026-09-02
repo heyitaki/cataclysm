@@ -15,7 +15,7 @@ Everything below needs the user present. None of it can run unattended.
 | r.7 | Remove two denied TCC rows for `com.example.assocprobe.never-granted` in System Settings (Accessibility, Input Monitoring); remove any stray Cataclysm row in Login Items left by an interrupted gate run | `tccutil` cannot delete rows |
 | r.8 | Remove the stale `mousejail` repo card from the Orca UI | Left over from the repo rename, which is done. Orca has no CLI for the removal |
 | r.9 | Icon artwork to replace the generated placeholder | |
-| r.10 | Developer ID membership decision: buy and notarize (`make release`, then the offline second-Mac install test), or ship `make dmg` with the README's Open Anyway walkthrough | This is all the $99 buys |
+| r.10 | Developer ID membership decision: buy and notarize (`make release`, then the offline second-Mac install test), or ship `make dmg` with the README's Open Anyway walkthrough | Decided 2026-09-01: no Developer ID. Ship `make dmg` with the website walkthrough (`specs/cataclysm-website.md`); `make release` removed on 2026-09-02 |
 | r.11 | Floor and hardware passes: macOS 13 (panel rendering, deep links, agent registration, login item), Intel or Rosetta launch, grant-in-Applications-then-run-from-Downloads | |
 
 ## Known low-severity issues, from the merge review

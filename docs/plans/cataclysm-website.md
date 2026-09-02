@@ -128,10 +128,10 @@ Read queue rows w.5 and w.5a in `specs/cataclysm-website.md` and the panel patte
 
 Read queue rows w.4 and w.4a in `specs/cataclysm-website.md`, the current `README.md` Install, Uninstall and Building from source sections, and `packaging/dmg-readme.txt` from Task 5.
 
-- [ ] README Install: step 1 downloads from `https://akshath.me/cataclysm`; the Open Anyway steps match the verified flow and the DMG read-me word for word where they overlap; the macOS 13 and 14 variant stays as a sub-bullet.
-- [ ] New `## Privacy` section between Uninstall and Building from source: the daily heartbeat, the exact field list (random install id, install date, app version, macOS version, CPU architecture, whether the app is enabled, whether the cursor lock is enabled), what is deliberately not sent (no game name, no IP address stored), on by default, the switch's name and location on the panel, that "Reset to defaults" turns it back on, and a one-line pointer to `worker/` as the receiving code.
-- [ ] Building from source: `make release` and notarization sentences removed; `make dmg VERSION=x.y.z` described as producing the four release assets and naming them.
-- [ ] `specs/progress.md` r.10 marked decided on 2026-09-01 (no Developer ID, `make dmg` with the website walkthrough) with r.1 left as is; `specs/cataclysm-website.md` w.4 and w.4a marked done. `make test` exits 0.
+- [x] README Install: step 1 downloads from `https://akshath.me/cataclysm`; the Open Anyway steps match the verified flow and the DMG read-me word for word where they overlap; the macOS 13 and 14 variant stays as a sub-bullet.
+- [x] New `## Privacy` section between Uninstall and Building from source: the daily heartbeat, the exact field list (random install id, install date, app version, macOS version, CPU architecture, whether the app is enabled, whether the cursor lock is enabled), what is deliberately not sent (no game name, no IP address stored), on by default, the switch's name and location on the panel, that "Reset to defaults" turns it back on, and a one-line pointer to `worker/` as the receiving code.
+- [x] Building from source: `make release` and notarization sentences removed; `make dmg VERSION=x.y.z` described as producing the four release assets and naming them.
+- [x] `specs/progress.md` r.10 marked decided on 2026-09-01 (no Developer ID, `make dmg` with the website walkthrough) with r.1 left as is; `specs/cataclysm-website.md` w.4 and w.4a marked done. `make test` exits 0.
 
 ### Task 9: Landing page in the site worktree
 
