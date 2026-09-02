@@ -1,7 +1,7 @@
 // Placeholder app icon generator: writes a 1024x1024 PNG (dark rounded square,
-// gold arena ring, cursor arrow standing in it — the Cataclysm ult as an icon,
-// matching the menu bar glyph). Pure drawing to a file, no system access; real
-// artwork replaces it post-completion.
+// gold arena ring, cursor arrow standing in it, the Cataclysm ult as an icon
+// matching the menu bar glyph). Pure drawing to a file, no system access. Real
+// artwork replaces it.
 
 import CoreGraphics
 import Foundation

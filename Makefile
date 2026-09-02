@@ -78,7 +78,7 @@ build/icon-1024.png: build/icon-gen
 
 # Full ten-slice iconset via iconutil; `sips -s format icns` is the fallback
 # because iconutil reports "Invalid Iconset" when sandboxing denies its mach
-# lookups — a sips success alongside an iconutil failure is environment, not a
+# lookups. A sips success alongside an iconutil failure is environment, not a
 # broken iconset.
 build/Cataclysm.icns: build/icon-1024.png
 	rm -rf build/Cataclysm.iconset

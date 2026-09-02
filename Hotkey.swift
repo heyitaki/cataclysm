@@ -39,7 +39,7 @@ func isValidHotkeyChord(modifiers: Int) -> Bool {
 }
 
 // Stored chord values come from UserDefaults, which a hand-edited plist can
-// make negative or huge — and RegisterEventHotKey takes both through UInt32
+// make negative or huge, and RegisterEventHotKey takes both through UInt32
 // conversions, so an unvalidated read would crash on every launch until a
 // manual `defaults delete`. A stored pair is usable only when the key code
 // is a hardware key code and the modifiers are a chord the recorder could

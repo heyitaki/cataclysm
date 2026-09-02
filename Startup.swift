@@ -26,7 +26,7 @@ final class InstanceLock {
 
     // Creates parent directories as needed. Returns false when another live
     // process (or another open descriptor) holds the lock, or when the lock
-    // file cannot be opened at all (openFailure set) — either way this
+    // file cannot be opened at all (openFailure set). Either way this
     // instance is not the owner and must touch nothing.
     func acquire() -> Bool {
         guard fd < 0 else { return true }

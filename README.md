@@ -4,7 +4,7 @@ Fixes the mouse for League of Legends on macOS.
 
 Playing League in a window on a Mac, three things are wrong out of the box: the cursor slips off the game window, so an edge flick mid-fight opens a context menu on the desktop instead of moving the camera; the pointer accelerates, so the same hand motion moves the cursor a different distance depending on how fast you made it; and the scroll wheel zooms the wrong way. Cataclysm fixes all three. It lives in the menu bar, works with sensible defaults the moment you grant it one permission, and everything adjustable is in the dropdown.
 
-The cursor fix is the capture technique virtual machines use: the hardware mouse is disconnected from the on-screen cursor and Cataclysm places the cursor itself, clamped to the game window, on every movement. The cursor cannot cross the window edge even for a frame. In windowed mode it follows the window's rounded corners so a click in the corner gap can't land on the app behind the game; in borderless and fullscreen modes the corners are sharp and the clamp is the plain rect, so the minimap corner stays reachable and the cursor stays on the game's display. Native macOS fullscreen is left to the game, which confines the cursor itself. It engages only while the game is frontmost and releases the instant it isn't.
+The cursor fix is the capture technique virtual machines use: the hardware mouse is disconnected from the on-screen cursor and Cataclysm places the cursor itself, clamped to the game window, on every movement. The cursor cannot cross the window edge even for a frame. In windowed mode it follows the window's rounded corners so a click in the corner gap can't land on the app behind the game. In borderless mode, and in the game's own fullscreen mode, the corners are sharp and the clamp is the plain rect, so the minimap corner stays reachable and the cursor stays on the game's display. Only native macOS fullscreen is left alone, because there the game confines the cursor itself. It engages only while the game is frontmost and releases the instant it isn't.
 
 ## Install
 
@@ -18,7 +18,7 @@ Needs macOS 13 (Ventura) or later; works on both Apple silicon and Intel Macs.
    - This is needed once. After that it opens like any other app.
 4. Cataclysm asks for the Accessibility permission on first run and walks you through granting it. It needs Accessibility to see mouse events; nothing works until it's granted.
 
-Look for the Cataclysm icon in the menu bar. The dropdown has the on/off switches, the application picker, and a scroll speed slider; the rest is under Advanced.
+Look for the Cataclysm icon in the menu bar. The switch beside the title in the dropdown turns every feature off and back on at once, and the icon shows a dotted ring while it is off. Below it are the individual switches, the application picker, and a scroll speed slider. The rest is under Advanced.
 
 Press ⌥⌘L to toggle the cursor lock at any time, even while the game has focus. You can record a different shortcut under Advanced.
 

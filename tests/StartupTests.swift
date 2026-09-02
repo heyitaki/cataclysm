@@ -48,7 +48,7 @@ struct StartupTests {
                 "lock file created with parent directories")
 
         // flock treats separate open descriptions as independent owners, so a
-        // second lock on the same path conflicts even in-process — the same
+        // second lock on the same path conflicts even in-process, the same
         // way a second launched copy would.
         let second = InstanceLock(path: path)
         checkEq(second.acquire(), false, "second acquire loses while held")

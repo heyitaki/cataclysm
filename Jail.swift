@@ -24,9 +24,8 @@ let axFullScreenAttribute = "AXFullScreen"
 var clampArea: Clamp?
 var virtualPos = CGPoint.zero
 var engaged = false
-// Runtime gate for the whole jail feature: the app's panel toggle (and later
-// its hotkey) flips it and calls refresh(). The CLI never changes it, so CLI
-// behavior is unchanged.
+// Runtime gate for the whole jail feature: the panel toggle and the hotkey
+// flip it and call refresh().
 var jailEnabled = true
 // A warp folds its displacement into the next mouse event's delta. Track it
 // so integration sees only hand movement, otherwise our own warps feed back

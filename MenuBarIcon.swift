@@ -55,8 +55,8 @@ func makeMenuBarIcon(active: Bool) -> NSImage {
         return true
     }
     image.isTemplate = true
-    // The old symbol-based label carried the app name for VoiceOver; an
-    // image-only label has to supply it itself.
+    // An image-only menu bar label carries no name of its own, so the image
+    // supplies one for VoiceOver.
     image.accessibilityDescription = "Cataclysm"
     return image
 }

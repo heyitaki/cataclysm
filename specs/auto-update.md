@@ -2,7 +2,7 @@
 
 Decided 2026-09-01; re-decided 2026-09-02 around Sparkle. Cataclysm updates itself over the air with [Sparkle 2](https://sparkle-project.org): it checks an appcast on a six-hour schedule, downloads and verifies a newer build in the background, and installs it when no game is running. The "Check for updates…" row in the panel runs the same machinery on demand. No Developer ID is needed; the roots of trust are the self-signed `Cataclysm` certificate the app is already signed with and an EdDSA key that Sparkle's tools generate.
 
-Depends on the website plan (`docs/plans/cataclysm-website.md`) only for the first public release (w.6). The feed is a GitHub release asset, so no Worker route is involved.
+Depends on the website plan (`specs/cataclysm-website.md`) only for the first public release (w.6). The feed is a GitHub release asset, so no Worker route is involved.
 
 Every platform claim below was measured on 2026-09-02 unless it is listed under "Unverified claims"; the probe is `.claude/pairs/auto-update-spec/evidence/sparkle-probe.sh` (gitignored, with its transcript beside it; evidence stays out of the repo by the user's call) and the results are summarised under "Measured facts".
 

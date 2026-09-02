@@ -36,7 +36,7 @@ struct WatcherTests {
     }
 
     static func releaseTests() {
-        // Startup (previous nil): absent releases once — the SIGKILL-took-
+        // Startup (previous nil): absent releases once, the SIGKILL-took-
         // both case where the restarted watcher never sees a transition.
         checkEq(watcherShouldRelease(previous: nil, present: false), true,
                 "startup with app absent releases")

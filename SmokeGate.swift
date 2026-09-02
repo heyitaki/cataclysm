@@ -1,12 +1,11 @@
-// The --smoke-register acceptance gate (spec "3a acceptance", run before the
-// Hammerspoon lua is retired): prove a watcher can be registered from the
-// real signed bundle by one of the two mechanisms, then leave no trace.
-// Prints one PASS/FAIL line per step and exits 0 only when a complete path —
-// SMAppService, or the legacy bootstrap after an SMAppService refusal —
-// passed every step including its own cleanup. Cleanup (unregister, bootout,
-// plist and lock-file removal) is guaranteed on every exit by a defer plus a
-// signal guard. This mode never touches taps, the acceleration property,
-// cursor association, or UI.
+// The --smoke-register acceptance gate (spec "3a acceptance"): prove a
+// watcher can be registered from the real signed bundle by one of the two
+// mechanisms, then leave no trace. Prints one PASS/FAIL line per step and
+// exits 0 only when a complete path, either SMAppService or the legacy
+// bootstrap after an SMAppService refusal, passed every step including its
+// own cleanup. Cleanup (unregister, bootout, plist and lock-file removal) is
+// guaranteed on every exit by a defer plus a signal guard. This mode never
+// touches taps, the acceleration property, cursor association, or UI.
 
 import Foundation
 import ServiceManagement

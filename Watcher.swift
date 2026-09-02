@@ -8,7 +8,7 @@
 import Foundation
 
 // One decision per poll tick. `previous` nil is the watcher's own startup: if
-// the app is already absent, release once before entering the loop — a
+// the app is already absent, release once before entering the loop: a
 // watcher that launchd just restarted after a SIGKILL observes absent
 // followed by absent and would never see a transition. After startup, release
 // only on a present-to-absent transition; a redundant release would be

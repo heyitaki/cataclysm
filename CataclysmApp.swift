@@ -16,8 +16,8 @@ let watcherPlistName = "\(cataclysmBundleID).watch.plist"
 
 // MARK: - Runtime globals shared with Jail/TapHost
 
-// The CLI derives these from arguments in main.swift; the app loads them from
-// the settings store during startup step 4, before any tap can read them.
+// Loaded from the settings store during startup step 4, before any tap can
+// read them.
 var gameBundle = Settings.Default.targetBundleID
 var cornerRadius = CGFloat(Settings.Default.cornerRadius)
 var scrollVerticalConfig = ScrollAxisConfig(
@@ -37,8 +37,8 @@ struct CataclysmMain {
         if args.contains("--smoke-register") {
             exit(SmokeGate().run())
         }
-        // The CLI's scroll measurement flag lives on in the app: it only sets
-        // the dump global, then the launch proceeds normally.
+        // The scroll measurement flag only sets the dump global, then the
+        // launch proceeds normally.
         if args.contains("--dump-scroll") {
             scrollDump = true
         }
@@ -48,7 +48,7 @@ struct CataclysmMain {
     }
 
     // The watcher process (spec "Crash recovery and the watcher"): no UI, no
-    // taps, no property writes, and no instance lock — it only ever calls the
+    // taps, no property writes, and no instance lock. It only ever calls the
     // idempotent release, so it can never conflict with a live app instance.
     // Deliberately tiny: launchd restarts a crashed KeepAlive job at most
     // about every 10s, so the less here that can crash, the better.
