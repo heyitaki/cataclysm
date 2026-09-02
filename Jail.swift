@@ -4,11 +4,14 @@
 
 import Cocoa
 
-let inset: CGFloat = 1
 // AX calls run on the thread that services the tap, and one refresh makes
 // several. Unbounded calls into a stalled game would freeze the cursor via
 // tap timeout.
 let axTimeout: Float = 0.05
+// The window's native-fullscreen state. Undocumented (the SDK only names the
+// button, kAXFullScreenButtonAttribute) but what AppKit answers and window
+// managers read.
+let axFullScreenAttribute = "AXFullScreen"
 
 // Main-thread only: the tap source, timer, and notifications share the main
 // run loop. Moving any of them off it would need synchronization here.
@@ -24,11 +27,46 @@ var jailEnabled = true
 // and the cursor rockets away.
 var pendingWarp = CGPoint.zero
 
-func axElement(_ parent: AXUIElement, _ attribute: String) -> AXUIElement? {
+// One attribute read with the failure kinds the callers need apart: missing
+// (the window has no such attribute) is a fact about the window, failed (a
+// timeout under load, the element gone) says nothing about it.
+enum AXRead {
+    case value(CFTypeRef), missing, failed
+
+    var failed: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+
+    var element: AXUIElement? {
+        guard case .value(let v) = self, CFGetTypeID(v) == AXUIElementGetTypeID() else { return nil }
+        return (v as! AXUIElement)
+    }
+
+    var string: String? {
+        guard case .value(let v) = self else { return nil }
+        return v as? String
+    }
+
+    // NSNumber bridges any number to Bool, so the CFBoolean type is checked
+    // explicitly (same rule as the settings reads).
+    var bool: Bool {
+        guard case .value(let v) = self, CFGetTypeID(v) == CFBooleanGetTypeID() else { return false }
+        return CFBooleanGetValue((v as! CFBoolean))
+    }
+}
+
+func axRead(_ el: AXUIElement, _ attribute: String) -> AXRead {
     var ref: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(parent, attribute as CFString, &ref) == .success,
-          let el = ref, CFGetTypeID(el) == AXUIElementGetTypeID() else { return nil }
-    return (el as! AXUIElement)
+    switch AXUIElementCopyAttributeValue(el, attribute as CFString, &ref) {
+    case .success: return ref.map { .value($0) } ?? .missing
+    case .noValue, .attributeUnsupported: return .missing
+    default: return .failed
+    }
+}
+
+func axElement(_ parent: AXUIElement, _ attribute: String) -> AXUIElement? {
+    axRead(parent, attribute).element
 }
 
 func axRect(_ el: AXUIElement) -> CGRect? {
@@ -44,28 +82,46 @@ func axRect(_ el: AXUIElement) -> CGRect? {
     return CGRect(origin: pos, size: size)
 }
 
-// AX half of the title-bar measurement; the inference rules live with the
-// rest of the pure geometry in JailMath.swift.
-func titleBarHeight(_ winEl: AXUIElement, frame: CGRect) -> CGFloat {
-    let closeButton = axElement(winEl, kAXCloseButtonAttribute).flatMap(axRect)
-    return inferredTitleBarHeight(closeButton: closeButton, frame: frame)
+// In the AX (top-left origin) coordinate space; empty when CG refuses, which
+// windowMode treats as "not fullscreen by size".
+func activeDisplayBounds() -> [CGRect] {
+    var count: UInt32 = 0
+    guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+    return ids.prefix(Int(count)).map(CGDisplayBounds)
 }
 
-func gameClamp(_ app: NSRunningApplication) -> Clamp? {
+// One AX measurement of the game window. unreadable is a transient AX
+// failure (the caller keeps its last rect); fullscreen asks for release.
+enum GameWindow {
+    case unreadable, fullscreen, clamp(Clamp)
+}
+
+func gameWindow(_ app: NSRunningApplication) -> GameWindow {
     let ax = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(ax, axTimeout)
     guard let winEl = axElement(ax, kAXFocusedWindowAttribute)
-        ?? axElement(ax, kAXMainWindowAttribute) else { return nil }
-    guard var rect = axRect(winEl) else { return nil }
-    let titleBar = titleBarHeight(winEl, frame: rect)
-    rect.origin.y += titleBar
-    rect.size.height -= titleBar
-    let inner = rect.insetBy(dx: inset, dy: inset)
-    // insetBy returns CGRect.null once a side is too thin to inset, and null's
-    // infinite origin turns virtualPos into NaN permanently: NaN never compares
-    // equal, so every later re-clamp warps again. Keep the last known rect.
-    guard !inner.isEmpty else { return nil }
-    return Clamp(rect: inner, titleBar: titleBar, cornerRadius: cornerRadius)
+        ?? axElement(ax, kAXMainWindowAttribute) else { return .unreadable }
+    guard let rect = axRect(winEl) else { return .unreadable }
+    // A chrome or fullscreen read that failed must not pass as absent: absent
+    // chrome drops the title-bar exclusion, and an absent flag engages over
+    // native fullscreen. A window without the attribute answers missing, which
+    // is absent for real (borderless answers AXUnknown for the subrole).
+    let subrole = axRead(winEl, kAXSubroleAttribute)
+    let fullScreen = axRead(winEl, axFullScreenAttribute)
+    let closeButton = axRead(winEl, kAXCloseButtonAttribute)
+    guard !subrole.failed, !fullScreen.failed, !closeButton.failed else { return .unreadable }
+    let mode = windowMode(
+        standardWindow: subrole.string == kAXStandardWindowSubrole,
+        hasCloseButton: closeButton.element != nil,
+        fullScreen: fullScreen.bool,
+        frame: rect, displays: activeDisplayBounds())
+    if mode == .fullscreen { return .fullscreen }
+    guard let clamp = jailClamp(mode: mode, frame: rect,
+                                closeButton: closeButton.element.flatMap(axRect),
+                                cornerRadius: cornerRadius) else { return .unreadable }
+    return .clamp(clamp)
 }
 
 func setEngaged(_ on: Bool) {
@@ -86,21 +142,27 @@ func setEngaged(_ on: Bool) {
     }
 }
 
+func release() {
+    clampArea = nil
+    setEngaged(false)
+}
+
 func refresh() {
     // tap != nil: engaging disassociates the hardware mouse from the cursor,
     // and only the tap callback moves it afterwards. With no tap (tapCreate
     // failed despite trust) that would freeze the cursor outright.
     guard jailEnabled, tap != nil,
           let front = NSWorkspace.shared.frontmostApplication,
-          front.bundleIdentifier == gameBundle else {
-        clampArea = nil
-        setEngaged(false)
-        return
-    }
-    // On a transient AX failure keep the last known rect. Releasing the
-    // cursor for a blip would let it escape.
-    if let c = gameClamp(front) {
+          front.bundleIdentifier == gameBundle else { return release() }
+    switch gameWindow(front) {
+    case .clamp(let c):
         clampArea = c
+    case .unreadable:
+        // Keep the last known rect. Releasing the cursor for a blip would let
+        // it escape.
+        break
+    case .fullscreen:
+        return release()
     }
     guard let area = clampArea else { return }
     setEngaged(true)

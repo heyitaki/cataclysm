@@ -1237,7 +1237,7 @@ struct PanelView: View {
             stepperRow("Corner radius",
                        value: Int(model.cornerRadiusSetting), range: 0...200,
                        set: { AppRuntime.shared.setCornerRadius(Double($0)) })
-                .help("Radius of the jail's rounded corners; 0 disables corner clamping")
+                .help("Radius of the jail's rounded corners in windowed mode; 0 disables corner clamping")
             menuDivider
             MenuRow(title: "Reset to defaults") {
                 AppRuntime.shared.resetToDefaults()

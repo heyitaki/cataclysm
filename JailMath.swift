@@ -1,8 +1,7 @@
-// Pure jail geometry: the rounded-rect clamp and the title-bar inference.
-// CoreGraphics-only (no AppKit, no AX) so the test harness can pin the
-// corner projection and ratio-table math; the AX measurement and engagement
-// state live in Jail.swift. The math is settled behavior moved verbatim from
-// there; only the cornerRadius global became an init parameter.
+// Pure jail geometry: the rounded-rect clamp, the title-bar inference, and
+// the display-mode classification. CoreGraphics-only (no AppKit, no AX) so
+// the test harness can pin the corner projection, ratio-table math, and mode
+// rules; the AX measurement and engagement state live in Jail.swift.
 
 import CoreGraphics
 import Foundation
@@ -59,11 +58,70 @@ struct Clamp {
     }
 }
 
+// The game's three display modes, which decide what the jail does:
+// - windowed: macOS draws the chrome, so the clamp excludes the title bar and
+//   follows the rounded corners.
+// - borderless: a bare window at the game resolution (League centres it on the
+//   display). No title bar and sharp corners, so the clamp is the plain rect;
+//   a radius here would wall the cursor off the minimap corner.
+// - fullscreen: the game confines the cursor itself, and a second capture on
+//   top would fight its warps. The jail releases.
+enum WindowMode {
+    case windowed, borderless, fullscreen
+}
+
+// The AX flag is native fullscreen, which can keep the standard subrole, so
+// it goes first. Chrome outranks size because a zoomed window covers the
+// display once the menu bar auto-hides. The size rule cannot tell exclusive
+// fullscreen from borderless at the display's own resolution: that case
+// releases, which on a single display loses nothing. A fullscreen window that
+// keeps clear of a camera housing is smaller than its display and would read
+// as borderless (unverified).
+func windowMode(standardWindow: Bool, hasCloseButton: Bool, fullScreen: Bool,
+                frame: CGRect, displays: [CGRect]) -> WindowMode {
+    if fullScreen { return .fullscreen }
+    if standardWindow || hasCloseButton { return .windowed }
+    return displays.contains(where: { coversDisplay(frame, $0) }) ? .fullscreen : .borderless
+}
+
+// The AX frame and CGDisplayBounds come from different sources, so a half
+// point of drift must not turn a fullscreen window into a borderless one,
+// which is the direction where the jail engages over a game already
+// confining the cursor.
+func coversDisplay(_ frame: CGRect, _ display: CGRect) -> Bool {
+    let tolerance: CGFloat = 1
+    return abs(frame.minX - display.minX) <= tolerance
+        && abs(frame.minY - display.minY) <= tolerance
+        && abs(frame.maxX - display.maxX) <= tolerance
+        && abs(frame.maxY - display.maxY) <= tolerance
+}
+
+let inset: CGFloat = 1
+
+// The clamp for a measured windowed or borderless frame (fullscreen never
+// reaches here). Windowed carves out the title bar and rounds the corners;
+// borderless has neither. nil once the inset leaves nothing: insetBy returns
+// CGRect.null when a side is too thin, and null's infinite origin turns
+// virtualPos into NaN permanently (NaN never compares equal, so every later
+// re-clamp warps again).
+func jailClamp(mode: WindowMode, frame: CGRect, closeButton: CGRect?,
+               cornerRadius: CGFloat) -> Clamp? {
+    let windowed = mode == .windowed
+    let titleBar = windowed ? inferredTitleBarHeight(closeButton: closeButton, frame: frame) : 0
+    var rect = frame
+    rect.origin.y += titleBar
+    rect.size.height -= titleBar
+    let inner = rect.insetBy(dx: inset, dy: inset)
+    guard !inner.isEmpty else { return nil }
+    return Clamp(rect: inner, titleBar: titleBar, cornerRadius: windowed ? cornerRadius : 0)
+}
+
 // The title bar must be excluded from the clamp or click-flicks drag the
 // window and ratchet the cursor out the top. Preferred measurement is the
 // close button, which sits vertically centered in the title bar; no close
-// button (nil) means borderless, fullscreen, or hidden controls, where the
-// ratio table takes over.
+// button (nil) means hidden controls, where the ratio table takes over.
+// jailClamp measures windowed mode only: borderless has no bar to find, and
+// its game-size frame can land in the ratio band by accident.
 func inferredTitleBarHeight(closeButton: CGRect?, frame: CGRect) -> CGFloat {
     if let btnRect = closeButton {
         let tb = btnRect.height + (btnRect.minY - frame.minY) * 2

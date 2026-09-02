@@ -1,6 +1,7 @@
 // Harness for the pure jail geometry (JailMath.swift): the rounded-rect
-// clamp's corner projection, radius capping, title-bar shrink, and the
-// title-bar inference rules. Pure functions; no AX, no windows.
+// clamp's corner projection, radius capping, title-bar shrink, the
+// title-bar inference rules, and the display-mode classification. Pure
+// functions; no AX, no windows.
 //
 // Build and run: make test
 
@@ -29,6 +30,8 @@ struct JailMathTests {
         cornerTests()
         radiusTests()
         titleBarTests()
+        windowModeTests()
+        jailClampTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
     }
@@ -122,5 +125,70 @@ struct JailMathTests {
                     closeButton: nil,
                     frame: CGRect(x: 0, y: 0, width: 800, height: 800)),
                 0, "no matching ratio infers no title bar")
+    }
+
+    static func windowModeTests() {
+        let display = CGRect(x: 0, y: 0, width: 3200, height: 1800)
+        let secondDisplay = CGRect(x: 3200, y: 0, width: 2560, height: 1440)
+        // Borderless as League draws it: the game resolution centred on the
+        // display.
+        let centred = CGRect(x: 640, y: 360, width: 1920, height: 1080)
+        func mode(standard: Bool = false, closeButton: Bool = false,
+                  fullScreen: Bool = false, frame: CGRect = centred,
+                  displays: [CGRect] = [display]) -> WindowMode {
+            windowMode(standardWindow: standard, hasCloseButton: closeButton,
+                       fullScreen: fullScreen, frame: frame, displays: displays)
+        }
+        checkEq(mode(), .borderless, "no chrome and a partial frame is borderless")
+        checkEq(mode(standard: true, closeButton: true), .windowed,
+                "standard subrole with a close button is windowed")
+        checkEq(mode(standard: true), .windowed, "standard subrole alone is windowed")
+        checkEq(mode(closeButton: true), .windowed, "close button alone is windowed")
+        checkEq(mode(standard: true, closeButton: true, fullScreen: true), .fullscreen,
+                "AX fullscreen flag outranks chrome")
+        checkEq(mode(frame: display), .fullscreen,
+                "a bare frame matching the display is fullscreen")
+        checkEq(mode(standard: true, closeButton: true, frame: display), .windowed,
+                "chrome at display size stays windowed")
+        checkEq(mode(frame: secondDisplay, displays: [display, secondDisplay]), .fullscreen,
+                "matching the second display is fullscreen")
+        checkEq(mode(frame: display.insetBy(dx: 0.5, dy: 0.5)), .fullscreen,
+                "half a point of drift still matches the display")
+        checkEq(mode(frame: display.offsetBy(dx: 0, dy: 30)), .borderless,
+                "display-sized frame off the display is borderless")
+        checkEq(mode(frame: CGRect(x: 0, y: 0, width: 1600, height: 900)), .borderless,
+                "a smaller frame at the display origin is borderless")
+        checkEq(mode(frame: CGRect(x: 3000, y: 0, width: 3000, height: 1600),
+                     displays: [display, secondDisplay]),
+                .borderless, "a frame enclosing a display without matching it is borderless")
+        // No displays enumerated (transient CG failure): never fullscreen by
+        // size alone.
+        checkEq(mode(frame: display, displays: []), .borderless,
+                "no display list never infers fullscreen by size")
+    }
+
+    static func jailClampTests() {
+        let frame = CGRect(x: 640, y: 360, width: 1920, height: 1080)
+        let closeButton = CGRect(x: 648, y: 366, width: 12, height: 12)
+        // Borderless: the plain frame less the inset, no title bar, no arcs,
+        // whatever the close button read said.
+        let bare = jailClamp(mode: .borderless, frame: frame, closeButton: closeButton,
+                             cornerRadius: 18)
+        checkEq(bare?.rect, frame.insetBy(dx: inset, dy: inset), "borderless keeps the whole frame")
+        checkEq(bare?.topRadius, 0, "borderless has no top arcs")
+        checkEq(bare?.bottomRadius, 0, "borderless has no bottom arcs")
+        // Windowed: the close button measures a 24 point bar (12 + 2*6), which
+        // comes off the top; the radius applies, shrunk at the top by the bar.
+        let chrome = jailClamp(mode: .windowed, frame: frame, closeButton: closeButton,
+                               cornerRadius: 18)
+        checkEq(chrome?.rect, CGRect(x: 640, y: 384, width: 1920, height: 1056)
+                    .insetBy(dx: inset, dy: inset),
+                "windowed carves out the title bar")
+        checkEq(chrome?.bottomRadius, 18, "windowed keeps the corner radius")
+        checkEq(chrome?.topRadius, 0, "windowed shrinks the top arcs by the bar")
+        // A frame too thin to inset yields nothing rather than CGRect.null.
+        check(jailClamp(mode: .borderless, frame: CGRect(x: 0, y: 0, width: 1, height: 100),
+                        closeButton: nil, cornerRadius: 18) == nil,
+              "a frame too thin to inset yields no clamp")
     }
 }
