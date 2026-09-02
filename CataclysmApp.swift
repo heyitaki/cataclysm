@@ -149,6 +149,8 @@ final class AppRuntime {
     private let hotkeyCenter = HotkeyCenter()
     private var refreshTimer: Timer?
     private var trustTimer: Timer?
+    private var telemetry: Telemetry?
+    private var telemetryTimer: Timer?
     private var activationObserver: NSObjectProtocol?
     private var pickerObservers: [NSObjectProtocol] = []
     private var onboarding: OnboardingController?
@@ -241,6 +243,31 @@ final class AppRuntime {
                 self?.rebuildGamePicker()
             })
         }
+        // The heartbeat (Telemetry.swift) runs only on the normal launch
+        // path. The ordering in main() is load-bearing: `--watch` and
+        // `--smoke-register` exit before start() is ever called, so neither
+        // the timer nor the immediate tick below exists in those processes.
+        // Each tick re-reads the switch, so turning it off cancels nothing in
+        // flight and simply leaves the next tick ineligible.
+        let heartbeat = Telemetry(settings: loaded, appVersion: appVersion())
+        telemetry = heartbeat
+        telemetryTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) {
+            [weak self] _ in self?.telemetryTick()
+        }
+        // Deferred like the feature start above so the first send follows the
+        // rest of startup instead of interleaving with it.
+        DispatchQueue.main.async { self.telemetryTick() }
+    }
+
+    private func telemetryTick() {
+        telemetry?.tick(transport: AppRuntime.sendHeartbeat)
+    }
+
+    // Production transport: fire and forget. The outcome is deliberately
+    // ignored; Telemetry stamps the attempt before calling this, so a failed
+    // send waits out the interval rather than retrying every hour.
+    private static func sendHeartbeat(_ request: URLRequest) {
+        URLSession.shared.dataTask(with: request).resume()
     }
 
     // Reopened from the panel's warning row after a lost grant; never shown
@@ -1203,10 +1230,11 @@ struct PanelView: View {
                            action: openLoginItems)
             }
             MenuRow(title: "Check for updates…") {
-                // Canonical post-rename URL; the repo rename is a
-                // release-checklist item that makes it live.
-                let releases = "https://github.com/heyitaki/cataclysm/releases"
-                if let url = URL(string: releases) { NSWorkspace.shared.open(url) }
+                // Interim: opens the website's download page until the
+                // updater's state-driven row replaces this one
+                // (specs/auto-update.md u.6).
+                let site = "https://akshath.me/cataclysm"
+                if let url = URL(string: site) { NSWorkspace.shared.open(url) }
             }
             MenuRow(title: "Quit Cataclysm") { AppRuntime.shared.quit() }
         }

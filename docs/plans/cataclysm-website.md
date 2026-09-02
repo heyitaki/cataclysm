@@ -120,9 +120,9 @@ Read `specs/cataclysm-website.md` "Usage and retention" and queue row w.5, plus 
 
 Read queue rows w.5 and w.5a in `specs/cataclysm-website.md` and the panel pattern in Context.
 
-- [ ] `SettingsModel.telemetryEnabled`, loaded at startup next to `launchAtLogin`; `AppRuntime.setTelemetryEnabled(_:)` writing settings and model; the production transport; a `telemetryTimer` (3600 s, repeating) created in `AppRuntime.start()` after startup completes, plus one immediate tick at the same point. Both the timer and the tick are skipped entirely under `--watch` and `--smoke-register` (they never reach this code path today; add a comment saying the ordering is load-bearing). Turning the switch off cancels nothing in flight and simply makes the next tick ineligible.
-- [ ] Panel: the `Toggle("Send anonymous usage stats")` row placed per Context; "Check for updates…" opens `https://akshath.me/cataclysm` with the comment replaced by one noting the row is interim until the updater's state-driven row (auto-update u.6).
-- [ ] `make test` (typecheck included) exits 0, `make app` and `codesign --verify --strict build/Cataclysm.app` exit 0. Mark w.5 and w.5a done in `specs/cataclysm-website.md`, noting u.5 lands after this.
+- [x] `SettingsModel.telemetryEnabled`, loaded at startup next to `launchAtLogin`; `AppRuntime.setTelemetryEnabled(_:)` writing settings and model; the production transport; a `telemetryTimer` (3600 s, repeating) created in `AppRuntime.start()` after startup completes, plus one immediate tick at the same point. Both the timer and the tick are skipped entirely under `--watch` and `--smoke-register` (they never reach this code path today; add a comment saying the ordering is load-bearing). Turning the switch off cancels nothing in flight and simply makes the next tick ineligible.
+- [x] Panel: the `Toggle("Send anonymous usage stats")` row placed per Context; "Check for updates…" opens `https://akshath.me/cataclysm` with the comment replaced by one noting the row is interim until the updater's state-driven row (auto-update u.6).
+- [x] `make test` (typecheck included) exits 0, `make app` and `codesign --verify --strict build/Cataclysm.app` exit 0. Mark w.5 and w.5a done in `specs/cataclysm-website.md`, noting u.5 lands after this.
 
 ### Task 8: README and progress.md
 
