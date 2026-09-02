@@ -64,36 +64,21 @@ struct Clamp {
 // - borderless: a bare window at the game resolution (League centres it on the
 //   display). No title bar and sharp corners, so the clamp is the plain rect;
 //   a radius here would wall the cursor off the minimap corner.
-// - fullscreen: the game confines the cursor itself, and a second capture on
-//   top would fight its warps. The jail releases.
+// - fullscreen: native fullscreen (the AX flag), where the game confines the
+//   cursor itself and a second capture on top would fight its warps. The
+//   jail releases.
 enum WindowMode {
     case windowed, borderless, fullscreen
 }
 
-// The AX flag is native fullscreen, which can keep the standard subrole, so
-// it goes first. Chrome outranks size because a zoomed window covers the
-// display once the menu bar auto-hides. The size rule cannot tell exclusive
-// fullscreen from borderless at the display's own resolution: that case
-// releases, which on a single display loses nothing. A fullscreen window that
-// keeps clear of a camera housing is smaller than its display and would read
-// as borderless (unverified).
-func windowMode(standardWindow: Bool, hasCloseButton: Bool, fullScreen: Bool,
-                frame: CGRect, displays: [CGRect]) -> WindowMode {
+// The flag goes first because native fullscreen can keep the standard
+// subrole. Exclusive fullscreen has no signal of its own and is a bare window
+// at the display's size, indistinguishable from borderless at native
+// resolution, so both get the plain rect clamp: a no-op on one display, and
+// on two it keeps the cursor on the game's display.
+func windowMode(standardWindow: Bool, hasCloseButton: Bool, fullScreen: Bool) -> WindowMode {
     if fullScreen { return .fullscreen }
-    if standardWindow || hasCloseButton { return .windowed }
-    return displays.contains(where: { coversDisplay(frame, $0) }) ? .fullscreen : .borderless
-}
-
-// The AX frame and CGDisplayBounds come from different sources, so a half
-// point of drift must not turn a fullscreen window into a borderless one,
-// which is the direction where the jail engages over a game already
-// confining the cursor.
-func coversDisplay(_ frame: CGRect, _ display: CGRect) -> Bool {
-    let tolerance: CGFloat = 1
-    return abs(frame.minX - display.minX) <= tolerance
-        && abs(frame.minY - display.minY) <= tolerance
-        && abs(frame.maxX - display.maxX) <= tolerance
-        && abs(frame.maxY - display.maxY) <= tolerance
+    return standardWindow || hasCloseButton ? .windowed : .borderless
 }
 
 let inset: CGFloat = 1

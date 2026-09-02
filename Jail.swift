@@ -110,16 +110,6 @@ func axRect(_ el: AXUIElement) -> AXRead<CGRect> {
     }
 }
 
-// In the AX (top-left origin) coordinate space; empty when CG refuses, which
-// windowMode treats as "not fullscreen by size".
-func activeDisplayBounds() -> [CGRect] {
-    var count: UInt32 = 0
-    guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
-    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
-    return ids.prefix(Int(count)).map(CGDisplayBounds)
-}
-
 // One AX measurement of the game window. unreadable is a transient AX
 // failure (the caller keeps its last rect); fullscreen asks for release.
 enum GameWindow {
@@ -144,11 +134,9 @@ func gameWindow(_ app: NSRunningApplication) -> GameWindow {
     let fullScreen = axBool(winEl, axFullScreenAttribute)
     let closeButton = axElement(winEl, kAXCloseButtonAttribute)
     guard !subrole.failed, !fullScreen.failed, !closeButton.failed else { return .unreadable }
-    let mode = windowMode(
-        standardWindow: subrole.payload == kAXStandardWindowSubrole,
-        hasCloseButton: closeButton.payload != nil,
-        fullScreen: fullScreen.payload ?? false,
-        frame: rect, displays: activeDisplayBounds())
+    let mode = windowMode(standardWindow: subrole.payload == kAXStandardWindowSubrole,
+                          hasCloseButton: closeButton.payload != nil,
+                          fullScreen: fullScreen.payload ?? false)
     if mode == .fullscreen { return .fullscreen }
     // Only the title-bar measurement needs the button's rect, so it is read
     // after the fullscreen decision.

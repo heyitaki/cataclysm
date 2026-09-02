@@ -128,43 +128,21 @@ struct JailMathTests {
     }
 
     static func windowModeTests() {
-        let display = CGRect(x: 0, y: 0, width: 3200, height: 1800)
-        let secondDisplay = CGRect(x: 3200, y: 0, width: 2560, height: 1440)
-        // Borderless as League draws it: the game resolution centred on the
-        // display.
-        let centred = CGRect(x: 640, y: 360, width: 1920, height: 1080)
         func mode(standard: Bool = false, closeButton: Bool = false,
-                  fullScreen: Bool = false, frame: CGRect = centred,
-                  displays: [CGRect] = [display]) -> WindowMode {
+                  fullScreen: Bool = false) -> WindowMode {
             windowMode(standardWindow: standard, hasCloseButton: closeButton,
-                       fullScreen: fullScreen, frame: frame, displays: displays)
+                       fullScreen: fullScreen)
         }
-        checkEq(mode(), .borderless, "no chrome and a partial frame is borderless")
+        // Borderless as League draws it: no chrome of any kind. Size plays no
+        // part, so a bare window at the display's size is jailed too.
+        checkEq(mode(), .borderless, "no chrome is borderless")
         checkEq(mode(standard: true, closeButton: true), .windowed,
                 "standard subrole with a close button is windowed")
         checkEq(mode(standard: true), .windowed, "standard subrole alone is windowed")
         checkEq(mode(closeButton: true), .windowed, "close button alone is windowed")
         checkEq(mode(standard: true, closeButton: true, fullScreen: true), .fullscreen,
                 "AX fullscreen flag outranks chrome")
-        checkEq(mode(frame: display), .fullscreen,
-                "a bare frame matching the display is fullscreen")
-        checkEq(mode(standard: true, closeButton: true, frame: display), .windowed,
-                "chrome at display size stays windowed")
-        checkEq(mode(frame: secondDisplay, displays: [display, secondDisplay]), .fullscreen,
-                "matching the second display is fullscreen")
-        checkEq(mode(frame: display.insetBy(dx: 0.5, dy: 0.5)), .fullscreen,
-                "half a point of drift still matches the display")
-        checkEq(mode(frame: display.offsetBy(dx: 0, dy: 30)), .borderless,
-                "display-sized frame off the display is borderless")
-        checkEq(mode(frame: CGRect(x: 0, y: 0, width: 1600, height: 900)), .borderless,
-                "a smaller frame at the display origin is borderless")
-        checkEq(mode(frame: CGRect(x: 3000, y: 0, width: 3000, height: 1600),
-                     displays: [display, secondDisplay]),
-                .borderless, "a frame enclosing a display without matching it is borderless")
-        // No displays enumerated (transient CG failure): never fullscreen by
-        // size alone.
-        checkEq(mode(frame: display, displays: []), .borderless,
-                "no display list never infers fullscreen by size")
+        checkEq(mode(fullScreen: true), .fullscreen, "AX fullscreen flag alone is fullscreen")
     }
 
     static func jailClampTests() {
