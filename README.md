@@ -2,6 +2,8 @@
 
 Cataclysm is a menu bar app that fixes mouse interactions for League of Legends and other games on macOS. It locks the cursor to the game in windowed mode, disables pointer acceleration, and inverts scroll directions. Download at [akshath.me/cataclysm](https://akshath.me/cataclysm) (needs macOS 13 or later, supports both Apple silicon and Intel).
 
+<img src="assets/dropdown.png" width="320" alt="Cataclysm's menu bar dropdown">
+
 ## First launch
 
 macOS blocks the first launch because Cataclysm is not in Apple's paid developer program (I want to keep it free). Once per Mac:
@@ -13,7 +15,7 @@ macOS blocks the first launch because Cataclysm is not in Apple's paid developer
 
 On macOS 13 and 14 steps 1 to 3 collapse into one: right-click Cataclysm in Applications, choose Open, then click Open again.
 
-Everything is in the menu bar dropdown. `⌥⌘L` toggles the cursor lock, even in game.
+Everything is in the menu bar dropdown. Cursor lock is only enforced while the game is focused (so you can tab out), but if you need it, `⌥⌘L` toggles the cursor lock even in-game.
 
 ## What it fixes
 
