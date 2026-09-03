@@ -1,8 +1,8 @@
 // Telemetry: the daily heartbeat, gated by the telemetry.enabled default
-// (Settings.swift; specs/cataclysm-website.md "Usage and retention"). This
-// module owns the install identity, the cadence and the request; the
-// transport that sends it is injected, so the harness never touches the
-// network and the app supplies the URLSession one (CataclysmApp.swift).
+// (Settings.swift). This module owns the install identity, the cadence and
+// the request; the transport that sends it is injected, so the harness
+// never touches the network and the app supplies the URLSession one
+// (CataclysmApp.swift).
 //
 // Cadence: eligible when the default is on and the last *attempt* is absent
 // or at least 20 hours old. The attempt timestamp is written before the

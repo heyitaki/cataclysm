@@ -1231,8 +1231,7 @@ struct PanelView: View {
             }
             MenuRow(title: "Check for updates…") {
                 // Interim: opens the website's download page until the
-                // updater's state-driven row replaces this one
-                // (specs/auto-update.md u.6).
+                // updater's state-driven row replaces this one.
                 let site = "https://akshath.me/cataclysm"
                 if let url = URL(string: site) { NSWorkspace.shared.open(url) }
             }

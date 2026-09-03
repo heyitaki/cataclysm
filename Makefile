@@ -37,7 +37,7 @@ build/cataclysm: build/cataclysm-arm64 build/cataclysm-x86_64
 # bundle ready for a notarizing identity should one ever exist; IDENTITY is
 # quoted because such identities ("Developer ID Application: ...") contain
 # spaces. Releases are never notarized: the website walks users through
-# Open Anyway instead (specs/progress.md r.10).
+# Open Anyway instead.
 app: build/cataclysm build/Cataclysm.icns packaging/Info.plist.in packaging/$(BUNDLE_ID).watch.plist
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(APP)/Contents/Library/LaunchAgents
@@ -166,7 +166,7 @@ DMG = build/Cataclysm-$(VERSION).dmg
 STABLE_DMG = build/Cataclysm.dmg
 ZIP = build/Cataclysm-$(VERSION).zip
 
-# Release assets (specs/cataclysm-website.md "Release asset contract"):
+# Release assets:
 # the versioned drag-to-install image, a byte-identical copy under a
 # version-stable name so the website's /download fallback can address it
 # without an API call, and the updater zip (ditto -c -k --keepParent keeps the
