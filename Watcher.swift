@@ -1,9 +1,8 @@
-// Watcher and registration primitives (spec "Crash recovery and the
-// watcher"): the release decision for the --watch poll loop, the version gate
-// for unregister-then-re-register on updates, and the legacy
-// ~/Library/LaunchAgents plist the app writes when SMAppService refuses the
-// self-signed identity. Foundation-only so the test harness can exercise all
-// of it without launchd, AppKit, or any system state.
+// Watcher and registration primitives: the release decision for the --watch
+// poll loop, the version gate for unregister-then-re-register on updates, and
+// the legacy ~/Library/LaunchAgents plist the app writes when SMAppService
+// refuses the self-signed identity. Foundation-only so the test harness can
+// exercise all of it without launchd, AppKit, or any system state.
 
 import Foundation
 

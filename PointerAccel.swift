@@ -49,8 +49,8 @@ final class PointerAccel {
     // True from the first successful write of -1 until a successful restore.
     // restore() without it would write a guessed original over a foreign -1
     // this process never touched. Re-writing a -1 that predates enable() does
-    // set it: per the spec's bootstrap rationale, an orphaned -1 (its holder
-    // force-quit) is deliberately claimed so quitting restores something.
+    // set it: an orphaned -1 (its holder force-quit) is deliberately claimed
+    // so quitting restores something.
     private var holding = false
     private var unavailableTicks = 0
     // Called with false on the transition into a failing HID write and true

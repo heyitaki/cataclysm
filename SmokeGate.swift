@@ -1,11 +1,11 @@
-// The --smoke-register acceptance gate (spec "3a acceptance"): prove a
-// watcher can be registered from the real signed bundle by one of the two
-// mechanisms, then leave no trace. Prints one PASS/FAIL line per step and
-// exits 0 only when a complete path, either SMAppService or the legacy
-// bootstrap after an SMAppService refusal, passed every step including its
-// own cleanup. Cleanup (unregister, bootout, plist and lock-file removal) is
-// guaranteed on every exit by a defer plus a signal guard. This mode never
-// touches taps, the acceleration property, cursor association, or UI.
+// The --smoke-register acceptance gate: prove a watcher can be registered
+// from the real signed bundle by one of the two mechanisms, then leave no
+// trace. Prints one PASS/FAIL line per step and exits 0 only when a complete
+// path, either SMAppService or the legacy bootstrap after an SMAppService
+// refusal, passed every step including its own cleanup. Cleanup (unregister,
+// bootout, plist and lock-file removal) is guaranteed on every exit by a
+// defer plus a signal guard. This mode never touches taps, the acceleration
+// property, cursor association, or UI.
 
 import Foundation
 import ServiceManagement
@@ -83,8 +83,7 @@ final class SmokeGate {
         }
         // SMAppService refused. The app's runtime falls back to the legacy
         // LaunchAgents job in exactly this case, so the gate repeats the same
-        // check through that mechanism (spec: "If registration is refused,
-        // run the same check against the ~/Library/LaunchAgents fallback").
+        // check through that mechanism.
         cleanupSM()
         // A PASS must leave no registered agent; while the SM agent cannot be
         // torn down, a legacy pass would print PASS over live residue.
@@ -206,8 +205,7 @@ final class SmokeGate {
         else { return false }
         // The legacy dump always echoes the absolute ProgramArguments path,
         // so only a live pid running that executable proves launchd ran the
-        // job rather than merely loaded it (spec: the fallback is "measured
-        // to run, not merely to load").
+        // job rather than merely loaded it.
         let (code, output, spawned) = pollLaunchctlPrint(label: watcherLabel) {
             launchctlPidResolvesExecutable($0, executablePath: executablePath,
                                            pathForPid: executablePath(ofPid:))

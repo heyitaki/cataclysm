@@ -1,6 +1,6 @@
-// Pure logic for the --smoke-register acceptance gate (spec "3a
-// acceptance"): the per-step report line and the launchctl-output check that
-// launchd resolved the watcher's executable inside the app bundle.
+// Pure logic for the --smoke-register acceptance gate: the per-step report
+// line and the launchctl-output check that launchd resolved the watcher's
+// executable inside the app bundle.
 // Foundation-only so the test harness can exercise both without launchd or
 // any system state; the fallible glue lives in SmokeGate.swift.
 

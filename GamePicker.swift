@@ -1,8 +1,8 @@
-// Game picker row building (spec "Game picker"): the stored target first,
-// then the pinned apps, then every running .regular app deduped by bundle id
-// and sorted case-insensitively by name. The jail matches frontmost by bundle
-// id, so an app without one is left out, and Cataclysm excludes itself
-// because selecting it would jail the cursor to the panel.
+// Game picker row building: the stored target first, then the pinned apps,
+// then every running .regular app deduped by bundle id and sorted
+// case-insensitively by name. The jail matches frontmost by bundle id, so an
+// app without one is left out, and Cataclysm excludes itself because
+// selecting it would jail the cursor to the panel.
 //
 // The stored target and the pinned apps must appear even when not running
 // (League's game client only exists during a match), so their rows are

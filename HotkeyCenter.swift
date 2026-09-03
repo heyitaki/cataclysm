@@ -1,8 +1,8 @@
-// The AppKit/Carbon half of the jail toggle hotkey (spec "The dropdown"):
-// global registration via RegisterEventHotKey, and the mechanism-2 capture
-// view for the recorder. Mechanism 1 (the local keyDown monitor) lives with
-// the recorder row's view state in CataclysmApp.swift; both feed the same
-// capture closure and the first to fire wins.
+// The AppKit/Carbon half of the jail toggle hotkey: global registration via
+// RegisterEventHotKey, and the mechanism-2 capture view for the recorder.
+// Mechanism 1 (the local keyDown monitor) lives with the recorder row's view
+// state in CataclysmApp.swift. Both feed the same capture closure and the
+// first to fire wins.
 
 import AppKit
 import Carbon.HIToolbox

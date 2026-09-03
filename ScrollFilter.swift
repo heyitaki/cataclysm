@@ -54,8 +54,7 @@ private let accumulatorFraction = 65_536
 private let accumulatorUnit = accumulatorFraction * 1_000
 private let maximumLineDelta = 1_000
 private let maximumSourceMagnitude = maximumLineDelta * accumulatorFraction
-// CoreGraphics derives 8 pixels per line, not the 10 folklore reports;
-// measured in the spec.
+// CoreGraphics derives 8 pixels per line, not the 10 folklore reports.
 private let pointsPerLine = 8
 private let maximumPointDelta = maximumLineDelta * pointsPerLine
 private let burstGap = 0.25

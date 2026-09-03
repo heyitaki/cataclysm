@@ -46,8 +46,8 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     return Unmanaged.passUnretained(event)
 }
 
-// Returns whether the tap came up. The CLI treats false as fatal; the app
-// keeps running and shows the feature as unavailable (a lost or missing
+// Returns whether the tap came up. False is never fatal: the app keeps
+// running and shows the feature as unavailable (a lost or missing
 // Accessibility grant is the common cause and is recoverable).
 func startTap() -> Bool {
     tap = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap,
@@ -70,8 +70,8 @@ func stopTap() {
     tap = nil
 }
 
-// Scroll filter tap (spec phase 2). Its own tail-append tap on scrollWheel
-// only, so it sees whatever vendor drivers produced and gets the last word.
+// Scroll filter tap. Its own tail-append tap on scrollWheel only, so it sees
+// whatever vendor drivers produced and gets the last word.
 // Never add the scrollWheel bit to the jail's head-insert mask: the masks are
 // disjoint on purpose, so no event ever runs through both callbacks and a
 // wheel notch can never reach the jail's warp path.

@@ -171,9 +171,9 @@ ZIP = build/Cataclysm-$(VERSION).zip
 # version-stable name so the website's /download fallback can address it
 # without an API call, and the updater zip (ditto -c -k --keepParent keeps the
 # signature, nested code and symlinks intact). The fourth asset, appcast.xml,
-# comes from a separate `make appcast` (auto-update u.3) because it needs the
-# EdDSA key from the login keychain. No .zip.sha256: the appcast carries the
-# zip's length and signature.
+# comes from a separate `make appcast` because it needs the EdDSA key from the
+# login keychain. No .zip.sha256: the appcast carries the zip's length and
+# signature.
 #
 # The image itself is deliberately NOT signed. Only the app inside is. A DMG
 # signed with the self-signed identity is refused at mount time with no

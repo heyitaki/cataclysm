@@ -1,6 +1,6 @@
-// Startup-order primitives (spec "First run"): instance ownership and the
-// install-location gate. Foundation-only so the test harness can exercise
-// both without touching AppKit or any system state beyond a temp file.
+// Startup-order primitives: instance ownership and the install-location
+// gate. Foundation-only so the test harness can exercise both without
+// touching AppKit or any system state beyond a temp file.
 
 import Foundation
 
