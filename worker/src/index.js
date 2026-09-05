@@ -66,7 +66,7 @@ const PING_FIELDS = {
 };
 
 /**
- * @typedef {{ name: string, browser_download_url: string, digest?: string | null }} ReleaseAsset
+ * @typedef {{ name: string, browser_download_url: string }} ReleaseAsset
  * @typedef {{ tag_name: string, draft?: boolean, prerelease?: boolean, assets?: ReleaseAsset[] }} Release
  */
 

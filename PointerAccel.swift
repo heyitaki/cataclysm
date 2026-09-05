@@ -95,8 +95,6 @@ final class PointerAccel {
         return Int32(exactly: (scaling * 65_536).rounded()) ?? fallback
     }
 
-    var isActive: Bool { timer != nil }
-
     // A released instance (disable() or restore() ran) whose write of the
     // original failed, so the property still reads -1 with nobody
     // reasserting it. writeFailing never covers this: exit-path writes are
