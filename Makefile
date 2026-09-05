@@ -100,17 +100,10 @@ build/Cataclysm.icns: build/icon-1024.png
 # typecheck first: the unit harnesses link only the pure modules, so without
 # it a rename in app-only code leaves `make test` green while `make app`
 # breaks for the next builder.
-test: typecheck build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/smoke-tests build/jailmath-tests build/telemetry-tests
-	./build/scrollfilter-tests
-	./build/settings-tests
-	./build/startup-tests
-	./build/panelmath-tests
-	./build/gamepicker-tests
-	./build/hotkey-tests
-	./build/watcher-tests
-	./build/smoke-tests
-	./build/jailmath-tests
-	./build/telemetry-tests
+TEST_BINARIES = build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/smoke-tests build/jailmath-tests build/telemetry-tests
+
+test: typecheck $(TEST_BINARIES)
+	@for t in $(TEST_BINARIES); do echo "./$$t"; ./$$t || exit 1; done
 
 # Whole-app compile check without linking, lipo, or signing. Same macOS 13
 # target as the real build, so an API newer than the floor fails here and
