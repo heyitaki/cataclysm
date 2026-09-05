@@ -149,7 +149,7 @@ build/jailmath-tests: JailMath.swift tests/JailMathTests.swift
 	mkdir -p build
 	xcrun swiftc -O JailMath.swift tests/JailMathTests.swift -o $@
 
-# Telemetry reads its switch and bookkeeping through Settings, so the harness
+# Telemetry reads its opt-out default and bookkeeping through Settings, so the harness
 # links the store and the two modules it depends on.
 build/telemetry-tests: Telemetry.swift Settings.swift ScrollFilter.swift Hotkey.swift tests/TelemetryTests.swift
 	mkdir -p build

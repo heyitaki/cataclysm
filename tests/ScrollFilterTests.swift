@@ -1,5 +1,4 @@
 // Table-driven harness for the scroll rewrite pipeline (ScrollFilter.swift).
-// Covers every case in the deleted design spec's "Testing" table.
 // Pure-function cases assert exact output triples; the
 // CGEvent cases assert field-write order, which nothing visible
 // distinguishes by eye.
@@ -55,7 +54,7 @@ func makeScrollEvent() -> CGEvent? {
 let notch = AxisDeltas(line: 1, point: 10, fixedPt: 1.0)
 let backNotch = AxisDeltas(line: -1, point: -10, fixedPt: -1.0)
 let idleAxis = AxisDeltas(line: 0, point: 0, fixedPt: 0.0)
-// The spec's upper-bound input: 50000 lines at multiplier 100.
+// Upper-bound input: 50000 lines at multiplier 100.
 let boundInput = AxisDeltas(line: 50000, point: 400000, fixedPt: 50000.0)
 
 @main
@@ -86,7 +85,7 @@ struct ScrollFilterTests {
             checkEq(out.reduce(0) { $0 + Int($1.line) }, want, "cumulative total at mul \(mul)")
         }
 
-        // The spec's exact 5-notch emission pattern at 0.6, inverted.
+        // Exact 5-notch emission pattern at 0.6, inverted.
         let five = run(Array(repeating: notch, count: 5), cfg(invert: true, mul: 600))
         checkEq(five.map(\.line), [0, -1, 0, -1, -1], "emission pattern at 0.6 inverted")
 
@@ -109,7 +108,7 @@ struct ScrollFilterTests {
                        cfg(flatten: false))
         checkEq(tiny, [AxisDeltas(line: 0, point: 0, fixedPt: 0.0)], "1/65536 fixed-point")
 
-        // Point-only event, inverted: the spec's exact full triple.
+        // Point-only event, inverted: the exact full triple.
         let pointOnly = run([AxisDeltas(line: 0, point: 16, fixedPt: 0.0)],
                             cfg(invert: true, flatten: false))
         checkEq(pointOnly, [AxisDeltas(line: -2, point: -16, fixedPt: -2.0)], "point-only 16px inverted")
