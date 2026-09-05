@@ -31,7 +31,7 @@ If Cataclysm is force-quit or crashes at the wrong moment, the cursor can be lef
 
 ## Uninstall
 
-Turn off "Launch at login", quit from the dropdown, and drag Cataclysm to the Trash. Quitting restores acceleration and reconnects the cursor. Remove any leftover Cataclysm entry under System Settings > General > Login Items. If `~/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` exists (written when the bundled watcher cannot be registered or never starts), run `launchctl bootout gui/$(id -u)/io.github.heyitaki.cataclysm.watch` and delete it.
+Uncheck "Launch at login" and quit from the dropdown, then move Cataclysm to Trash. Quitting restores acceleration and reconnects the cursor. Remove any leftover Cataclysm entry under System Settings > General > Login Items. If `~/Library/LaunchAgents/io.github.heyitaki.cataclysm.watch.plist` exists (written when the bundled watcher cannot be registered or never starts), run `launchctl bootout gui/$(id -u)/io.github.heyitaki.cataclysm.watch` and delete it.
 
 ## Building from source
 
