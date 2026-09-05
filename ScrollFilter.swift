@@ -58,7 +58,6 @@ private let maximumSourceMagnitude = maximumLineDelta * accumulatorFraction
 private let pointsPerLine = 8
 private let maximumPointDelta = maximumLineDelta * pointsPerLine
 private let burstGap = 0.25
-private let defaultMulThousandths = 1_000
 
 private struct EffectiveSource {
     let magnitude: Int
@@ -75,15 +74,6 @@ func clampedLinesPerNotch(_ raw: Int) -> Int {
 
 func clampedMulThousandths(_ raw: Int) -> Int {
     min(max(raw, 1), 100_000)
-}
-
-func clampedMulThousandths(fromMultiplier raw: Double) -> Int {
-    guard raw.isFinite else {
-        return defaultMulThousandths
-    }
-    // The 0.001...100 clamp guarantees the scaled value converts exactly; the
-    // Int overload restates the same bounds in thousandths.
-    return clampedMulThousandths(Int((min(max(raw, 0.001), 100) * 1_000).rounded()))
 }
 
 // The fixed-point field carries nothing when it is non-finite or too small to

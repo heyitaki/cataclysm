@@ -335,12 +335,5 @@ struct ScrollFilterTests {
         checkEq(clampedLinesPerNotch(3), 3, "in-range lines untouched")
         checkEq(clampedMulThousandths(0), 1, "mul 0 clamps to 1")
         checkEq(clampedMulThousandths(200000), 100000, "mul above bound clamps to 100000")
-        // A non-finite multiplier reaches an Int64 conversion that terminates
-        // the process; it must fall back to the default instead.
-        checkEq(clampedMulThousandths(fromMultiplier: Double.nan), 1000, "NaN multiplier -> default")
-        checkEq(clampedMulThousandths(fromMultiplier: .infinity), 1000, "infinite multiplier -> default")
-        checkEq(clampedMulThousandths(fromMultiplier: 0), 1, "multiplier 0 clamps to minimum")
-        checkEq(clampedMulThousandths(fromMultiplier: 0.6), 600, "0.6 stored exactly as 600")
-        checkEq(clampedMulThousandths(fromMultiplier: 100.0), 100000, "100 stored as 100000")
     }
 }
