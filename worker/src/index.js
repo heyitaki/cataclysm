@@ -374,18 +374,9 @@ export function makeHandler({ fetch, now }) {
   };
 }
 
-const handler = makeHandler({
-  fetch: (...args) => globalThis.fetch(...args),
-  now: () => Date.now(),
-});
-
 export default {
-  /**
-   * @param {Request} request
-   * @param {Record<string, any>} env
-   * @returns {Promise<Response>}
-   */
-  fetch(request, env) {
-    return handler(request, env);
-  },
+  fetch: makeHandler({
+    fetch: (...args) => globalThis.fetch(...args),
+    now: Date.now,
+  }),
 };
