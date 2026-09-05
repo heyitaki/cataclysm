@@ -1484,8 +1484,14 @@ struct PanelView: View {
                 draggingSlider = editing
                 if !editing { commitSlider() }
             }
-            Text(multiplierLabel(forThousandths: readout))
-                .monospacedDigit()
+            // Sized to the widest in-range readout so the slider does not
+            // shrink when the value reaches two digits.
+            ZStack(alignment: .trailing) {
+                Text(multiplierLabel(forThousandths: mulThousandths(forMultiplier: sliderMultiplierMax)))
+                    .hidden()
+                Text(multiplierLabel(forThousandths: readout))
+            }
+            .monospacedDigit()
             Button {
                 AppRuntime.shared.setMulThousandths(1_000)
                 sliderPos = sliderPosition(forMultiplier: 1.0)
