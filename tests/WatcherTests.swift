@@ -1,6 +1,6 @@
 // Harness for the watcher primitives (Watcher.swift): the poll loop's
-// release decision including the startup case, the version gate for
-// re-registration, and the legacy LaunchAgents plist round-trip. Pure
+// release decision including the startup case, the registration plan, and
+// the legacy LaunchAgents plist round-trip. Pure
 // functions; no launchd, no files, no system state.
 //
 // Build and run: make test
@@ -27,7 +27,6 @@ struct WatcherTests {
     static func main() {
         releaseTests()
         presenceTests()
-        reregistrationTests()
         registrationPlanTests()
         derivationTests()
         legacyPlistTests()
@@ -97,15 +96,6 @@ struct WatcherTests {
         let own = processArguments(pid: getpid())
         checkEq(own.first?.hasSuffix("watcher-tests") ?? false, true,
                 "own argv reads back through sysctl")
-    }
-
-    static func reregistrationTests() {
-        checkEq(needsWatcherReregistration(lastRegistered: nil, current: "0.1.0"),
-                true, "never registered needs registration")
-        checkEq(needsWatcherReregistration(lastRegistered: "0.1.0", current: "0.2.0"),
-                true, "version change needs re-registration")
-        checkEq(needsWatcherReregistration(lastRegistered: "0.1.0", current: "0.1.0"),
-                false, "same version needs nothing")
     }
 
     static func registrationPlanTests() {

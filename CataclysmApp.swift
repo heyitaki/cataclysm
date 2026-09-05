@@ -488,8 +488,7 @@ final class AppRuntime {
         let plan = watcherRegistrationPlan(
             statusEnabled: agent.status == .enabled,
             legacyCurrent: legacyWatcherCurrent(),
-            versionChanged: needsWatcherReregistration(
-                lastRegistered: settings.lastRegisteredVersion, current: version))
+            versionChanged: settings.lastRegisteredVersion != version)
         if plan.unregisterFirst {
             do {
                 try agent.unregister()
@@ -1444,15 +1443,14 @@ struct PanelView: View {
     // rather than checked, and only a healthy feature shows its stored value.
     // A failed toggle reads unchecked, so a click would arrive as `true`
     // whatever is stored: while the feature still has an effect to undo
-    // (`held`, the stored value unless the caller knows better), that click
+    // (`held`), that click
     // means "turn it off" and is routed as false; with nothing to turn off
     // the control is disabled, so a click cannot silently persist a
     // preference the checkbox never shows.
     private func featureToggle(_ title: String, isOn: Bool, failed: Bool,
-                               unavailable: Bool? = nil, held: Bool? = nil,
+                               unavailable: Bool? = nil, held: Bool,
                                set: @escaping (Bool) -> Void) -> some View {
         let unavailable = unavailable ?? !state.trusted
-        let held = held ?? isOn
         // Master switch off: rows dim but keep their stored checkmarks (the
         // preferences are kept, and unchecked would read as cleared). The
         // one exception stays live: a failed toggle that still holds an

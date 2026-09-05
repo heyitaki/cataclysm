@@ -1,7 +1,6 @@
 // Watcher and registration primitives: the release decision for the --watch
-// poll loop, the version gate for unregister-then-re-register on updates, and
-// the legacy ~/Library/LaunchAgents plist the app writes when SMAppService
-// refuses the self-signed identity. Foundation-only so the test harness can
+// poll loop, the registration plan, and the legacy ~/Library/LaunchAgents
+// plist the app writes when SMAppService refuses the self-signed identity. Foundation-only so the test harness can
 // exercise all of it without launchd, AppKit, or any system state.
 
 import Foundation
@@ -61,14 +60,6 @@ func parseProcArgs(_ bytes: [UInt8]) -> [String] {
         index = end + 1
     }
     return args
-}
-
-// Every release changes the watcher executable, and SMAppService may not
-// launch an agent whose executable changed unless it is re-registered
-// (unregister first, per its header). nil means no registration has ever
-// succeeded, which likewise needs one.
-func needsWatcherReregistration(lastRegistered: String?, current: String) -> Bool {
-    lastRegistered != current
 }
 
 // What registerWatcher must do, decided from one status snapshot: an enabled

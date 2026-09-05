@@ -112,17 +112,9 @@ final class Settings {
         return value
     }
 
-    private func finiteDouble(_ key: String, or fallback: Double) -> Double {
-        finiteDoubleOptional(key) ?? fallback
-    }
-
     private func nonEmptyOptional(_ key: String) -> String? {
         guard let value = defaults.string(forKey: key), !value.isEmpty else { return nil }
         return value
-    }
-
-    private func nonEmptyString(_ key: String, or fallback: String) -> String {
-        nonEmptyOptional(key) ?? fallback
     }
 
     // Optional bookkeeping values: nil removes the key rather than storing a
@@ -150,17 +142,17 @@ final class Settings {
     }
 
     var targetBundleID: String {
-        get { nonEmptyString(Key.targetBundleID, or: Default.targetBundleID) }
+        get { nonEmptyOptional(Key.targetBundleID) ?? Default.targetBundleID }
         set { defaults.set(newValue, forKey: Key.targetBundleID) }
     }
 
     var targetDisplayName: String {
-        get { nonEmptyString(Key.targetDisplayName, or: Default.targetDisplayName) }
+        get { nonEmptyOptional(Key.targetDisplayName) ?? Default.targetDisplayName }
         set { defaults.set(newValue, forKey: Key.targetDisplayName) }
     }
 
     var cornerRadius: Double {
-        get { clampedCornerRadius(finiteDouble(Key.cornerRadius, or: Default.cornerRadius)) }
+        get { clampedCornerRadius(finiteDoubleOptional(Key.cornerRadius) ?? Default.cornerRadius) }
         set { defaults.set(clampedCornerRadius(newValue), forKey: Key.cornerRadius) }
     }
 
