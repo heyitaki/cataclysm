@@ -199,7 +199,7 @@ final class AppRuntime {
     func start() {
         let loaded = Settings()
         settings = loaded
-        applySettings(loaded)
+        applySettings()
         // The hotkey needs no Accessibility grant, so it registers before
         // trust; toggling while ungranted just flips the stored preference.
         hotkeyCenter.onHotkey = { [weak self] in
@@ -278,13 +278,12 @@ final class AppRuntime {
         onboarding?.show()
     }
 
-    private func applySettings(_ s: Settings) {
-        gameBundle = s.targetBundleID
-        cornerRadius = CGFloat(s.cornerRadius)
-        jailEnabled = s.jailEnabled
-        scrollVerticalConfig = s.verticalScrollConfig
-        scrollHorizontalConfig = s.horizontalScrollConfig
-        scrollAltDetection = s.altTrackpadDetection
+    private func applySettings() {
+        guard let settings else { return }
+        gameBundle = settings.targetBundleID
+        cornerRadius = CGFloat(settings.cornerRadius)
+        jailEnabled = settings.jailEnabled
+        applyScrollConfigs()
         reloadPanel()
     }
 
@@ -894,7 +893,7 @@ final class AppRuntime {
     func resetToDefaults() {
         guard let settings else { return }
         settings.resetToDefaults()
-        applySettings(settings)
+        applySettings()
         applyHotkey()
         syncLoginItem()
         // The reset restores the master switch to on; if it was off, the
