@@ -1,7 +1,7 @@
 // Cataclysm app entry. `main()` dispatches on arguments before SwiftUI ever
 // loads, so the watcher (`--watch`) and the acceptance gate (`--smoke-register`)
 // never start UI, never touch AppKit state, and can run headless under launchd.
-// A plain launch runs the spec's six startup steps in order: instance lock,
+// A plain launch runs six startup steps in order: instance lock,
 // cursor re-association, install-location gate, clamped settings load, trust
 // check, and only then taps, the acceleration property, and agent
 // registration. Steps 1-3 run before any UI, so a duplicate launch or a
@@ -47,8 +47,8 @@ struct CataclysmMain {
         CataclysmApp.main()
     }
 
-    // The watcher process (spec "Crash recovery and the watcher"): no UI, no
-    // taps, no property writes, and no instance lock. It only ever calls the
+    // The watcher process: no UI, no taps, no property writes, and no
+    // instance lock. It only ever calls the
     // idempotent release, so it can never conflict with a live app instance.
     // Deliberately tiny: launchd restarts a crashed KeepAlive job at most
     // about every 10s, so the less here that can crash, the better.
@@ -78,8 +78,8 @@ struct CataclysmMain {
 
 // MARK: - Observable status for the panel
 
-// Published state behind the panel's status and failure rows (spec "Status
-// and failures"). Every failure the app can have surfaces here, because the
+// Published state behind the panel's status and failure rows. Every failure
+// the app can have surfaces here, because the
 // panel is the app's only surface.
 final class AppState: ObservableObject {
     @Published var trusted = false
@@ -186,7 +186,7 @@ final class AppRuntime {
             exit(0)
         }
         // Thaw a cursor a dead instance left frozen. Needs no Accessibility
-        // grant (measured, spec appendix), so this works ungranted.
+        // grant (measured), so this works ungranted.
         CGAssociateMouseAndMouseCursorPosition(1)
         if isBlockedInstallLocation(Bundle.main.bundlePath) {
             showMoveToApplicationsScreen()
@@ -231,8 +231,8 @@ final class AppRuntime {
         trustTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
             [weak self] _ in self?.trustTick()
         }
-        // Keep the game picker fresh for the panel's whole lifetime (spec
-        // "Game picker"): a target quitting while the panel is open drops to
+        // Keep the game picker fresh for the panel's whole lifetime: a target
+        // quitting while the panel is open drops to
         // the synthesized stored row with the selection unchanged. These are
         // NSWorkspace.shared.notificationCenter notifications, not
         // NotificationCenter.default ones.
@@ -443,7 +443,7 @@ final class AppRuntime {
         state.accelWriteFailing = pointerAccel.writeFailing || pointerAccel.restoreFailed
     }
 
-    // Called only after trust (Task 6 owns the ordering), so no agent is ever
+    // Called only after trust, so no agent is ever
     // registered on a first launch that is still ungranted or quarantined.
     private func registerAgentsIfNeeded() {
         syncLoginItem()
@@ -505,7 +505,7 @@ final class AppRuntime {
         }
         if plan.register {
             // The legacy job and the SMAppService agent share one launchd
-            // label (spec: the fallback is "the same job"), so launchd holds
+            // label (the fallback is the same job), so launchd holds
             // at most one of them and `bootout` on that label unloads
             // whichever is loaded. A legacy job left over from a build
             // SMAppService refused therefore has to go before register()
@@ -705,7 +705,7 @@ final class AppRuntime {
     // MARK: - Panel write-through
 
     // Every control writes through the settings store and applies
-    // immediately (spec "The dropdown"). Setters are safe to call while
+    // immediately. Setters are safe to call while
     // ungranted: they persist the preference, and the live half applies when
     // startFeatures() runs.
 
@@ -734,8 +734,8 @@ final class AppRuntime {
         if state.featuresRunning { refresh() }
     }
 
-    // Persist the bundle id and the display name together (spec "Game
-    // picker"): the synthesized row needs both when the target is absent.
+    // Persist the bundle id and the display name together: the synthesized
+    // row needs both when the target is absent.
     func setTarget(bundleID: String, name: String) {
         settings?.targetBundleID = bundleID
         settings?.targetDisplayName = name
@@ -862,7 +862,7 @@ final class AppRuntime {
     // MARK: - Hotkey
 
     // Persist first, then register: a chord another app owns still stores and
-    // displays, with the failure shown in the row (spec's recorder rules).
+    // displays, with the failure shown in the row.
     func setHotkey(keyCode: Int, modifiers: Int) {
         settings?.hotkeyKeyCode = keyCode
         settings?.hotkeyModifiers = modifiers
@@ -885,7 +885,7 @@ final class AppRuntime {
 
     // MARK: - Resets
 
-    // "Reset to defaults" per the spec: erase chosen settings (never
+    // "Reset to defaults": erase chosen settings (never
     // recovery.-prefixed keys; the store enforces that) and reapply the
     // defaults immediately. For acceleration that means writing -1 again,
     // not restoring: the default is on, so a running feature keeps holding
@@ -938,7 +938,7 @@ final class AppRuntime {
         scrollAltDetection = settings.altTrackpadDetection
     }
 
-    // Menu Quit per the spec: restore the acceleration property, re-associate
+    // Menu Quit: restore the acceleration property, re-associate
     // the cursor, exit 0. The atexit restorer runs the same two calls again,
     // which is fine because both are idempotent.
     func quit() -> Never {
@@ -970,7 +970,7 @@ final class AppRuntime {
     }
 
     // The trusted state may only update after a relaunch on some macOS
-    // versions (spec keeps the button until the poll is verified enough).
+    // versions, so the button stays until the poll is verified enough.
     // sh outlives this process, so the new instance starts after the lock
     // and the atexit restorers have run.
     static func relaunch() -> Never {
@@ -1105,7 +1105,7 @@ struct CataclysmApp: App {
     private static let inactiveIcon = makeMenuBarIcon(active: false)
 
     var body: some Scene {
-        // `.window` style is a spec requirement: the scroll slider does not
+        // `.window` style because the scroll slider does not
         // render in `.menu`.
         MenuBarExtra {
             PanelView(state: AppRuntime.shared.state, model: AppRuntime.shared.panel)
@@ -1116,7 +1116,7 @@ struct CataclysmApp: App {
     }
 }
 
-// The default view (spec "The dropdown"), laid out as menu rows: every row
+// The default view, laid out as menu rows: every row
 // shares one height and inset, commands lift on hover like Control Center
 // rows, and the Advanced knobs live on a second page standing in for a
 // submenu (a `.window` panel has no real ones). Width fixed at 320 points so
@@ -1237,7 +1237,7 @@ struct PanelView: View {
         }
     }
 
-    // The Advanced page (spec "The dropdown"): the knobs a player has no
+    // The Advanced page: the knobs a player has no
     // reason to touch. Scroll knobs share the slider's disabled rule; the
     // hotkey row, corner radius, and the commands stay live because they are
     // preference writes, not tap-dependent.
@@ -1721,7 +1721,7 @@ struct MenuRow: View {
 
 // MARK: - Hotkey recorder
 
-// The jail toggle hotkey row (spec's recorder rules). Mechanism 1 is a local
+// The jail toggle hotkey row. Mechanism 1 is a local
 // keyDown monitor installed while recording; mechanism 2 is the first-
 // responder KeyCaptureNSView sitting invisibly in the row, armed on the same
 // flag. Whichever fires first wins via the single handle() path. Two rules

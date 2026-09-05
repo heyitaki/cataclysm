@@ -1,11 +1,11 @@
 // Settings: the UserDefaults-backed store behind every panel control.
-// Validation happens on every read, not only in the UI, per the spec's
-// persistence rules: out-of-bounds numbers are clamped (multiplier 0.001-100
+// Validation happens on every read, not only in the UI: out-of-bounds
+// numbers are clamped (multiplier 0.001-100
 // stored as thousandths, lines per notch 1-1000, corner radius 0-200), a
 // value of the wrong type or non-finite falls back to its default, and keys
 // this version does not know are left untouched so a downgrade keeps a newer
 // version's settings. Reads never rewrite storage: a stored multiplier
-// outside the slider's 0.25x-4.0x range is legal and stays exactly as
+// outside the slider's range is legal and stays exactly as
 // stored, with only the slider parked at the nearer end.
 //
 // recovery.-prefixed keys are recovery metadata, not preferences. They are
@@ -214,7 +214,7 @@ final class Settings {
         set { defaults.set(newValue, forKey: Key.hotkeyModifiers) }
     }
 
-    // The sketch in the spec's dropdown section ships this checked: the app
+    // Ships checked: the app
     // fixes acceleration and scroll with defaults, which only holds across
     // reboots if it comes back at login. The stored flag is the preference;
     // SMAppService.mainApp registration is the consumer's job.
@@ -273,7 +273,7 @@ final class Settings {
 
     // MARK: - Reset
 
-    // "Reset to defaults" per the spec: erase the settings a person chose,
+    // "Reset to defaults": erase the settings a person chose,
     // never anything recovery.-prefixed, and leave unknown keys (a newer
     // version's settings) alone. Reapplying the live defaults immediately
     // (writing -1 to the acceleration property again, not restoring) is the
