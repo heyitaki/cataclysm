@@ -15,7 +15,7 @@ macOS blocks the first launch because Cataclysm is not in Apple's paid developer
 
 On macOS 13 and 14 steps 1 to 3 collapse into one: right-click Cataclysm in Applications, choose Open, then click Open again.
 
-Everything is in the menu bar dropdown. Cursor lock is only enforced while the game is focused (so you can tab out), but if you need it, `⌥⌘L` toggles the cursor lock even in-game.
+Everything is in the menu bar dropdown. Cursor lock is only enforced while the game is focused (so you can tab out), but if you need it, `⌥⌘L` toggles the cursor lock even in-game. The menu bar icon's arrow fills in while the cursor lock is holding the cursor.
 
 ## What it fixes
 

@@ -86,6 +86,9 @@ final class AppState: ObservableObject {
     @Published var featuresRunning = false
     @Published var jailTapUp = false
     @Published var scrollTapUp = false
+    // The lock is holding the cursor right now, distinct from the stored
+    // jailEnabled preference: the game may not be frontmost.
+    @Published var jailEngaged = false
     // A false return from the HID property write feels identical to the curve
     // merely being different, so the toggle must show failed, not checked.
     @Published var accelWriteFailing = false
@@ -199,6 +202,9 @@ final class AppRuntime {
     func start() {
         let loaded = Settings()
         settings = loaded
+        // setEngaged only runs from the tap callback and the refresh timer,
+        // both on the main run loop, so the publish needs no dispatch.
+        onEngagedChange = { [weak self] on in self?.state.jailEngaged = on }
         applySettings()
         // The hotkey needs no Accessibility grant, so it registers before
         // trust; toggling while ungranted just flips the stored preference.
@@ -1117,9 +1123,12 @@ struct OnboardingView: View {
 
 struct CataclysmApp: App {
     @ObservedObject private var panel = AppRuntime.shared.panel
-    // Drawn once per state; the label re-evaluates on every panel change.
-    private static let activeIcon = makeMenuBarIcon(active: true)
-    private static let inactiveIcon = makeMenuBarIcon(active: false)
+    @ObservedObject private var state = AppRuntime.shared.state
+    // Drawn once per state; the label re-evaluates on every panel or state
+    // change and follows the master switch, then the cursor lock.
+    private static let offIcon = makeMenuBarIcon(.off)
+    private static let onIcon = makeMenuBarIcon(.on)
+    private static let engagedIcon = makeMenuBarIcon(.engaged)
 
     var body: some Scene {
         // `.window` style because the scroll slider does not
@@ -1127,7 +1136,8 @@ struct CataclysmApp: App {
         MenuBarExtra {
             PanelView(state: AppRuntime.shared.state, model: AppRuntime.shared.panel)
         } label: {
-            Image(nsImage: panel.enabled ? Self.activeIcon : Self.inactiveIcon)
+            Image(nsImage: !panel.enabled ? Self.offIcon
+                  : state.jailEngaged ? Self.engagedIcon : Self.onIcon)
         }
         .menuBarExtraStyle(.window)
     }

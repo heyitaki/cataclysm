@@ -24,6 +24,9 @@ let axFullScreenAttribute = "AXFullScreen"
 var clampArea: Clamp?
 var virtualPos = CGPoint.zero
 var engaged = false
+// Engage and release transitions publish to the panel state so the menu bar
+// icon can show the lock.
+var onEngagedChange: ((Bool) -> Void)?
 // Runtime gate for the whole jail feature: the panel toggle and the hotkey
 // flip it and call refresh().
 var jailEnabled = true
@@ -162,6 +165,8 @@ func setEngaged(_ on: Bool) {
         pendingWarp = .zero
         CGAssociateMouseAndMouseCursorPosition(1)
     }
+    // After the cursor work, so an observer reads a settled state.
+    onEngagedChange?(on)
 }
 
 func releaseJail() {
