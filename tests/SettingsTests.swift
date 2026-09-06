@@ -89,7 +89,7 @@ struct SettingsTests {
         check(s.telemetryInstallCreated == nil, "default: no install date")
         check(s.telemetryLastAttempt == nil, "default: no ping attempt")
         check(Settings.Key.all.contains(Settings.Key.telemetryEnabled),
-              "telemetry switch is a preference")
+              "telemetry opt-out is a preference")
         check(!Settings.Key.all.contains(Settings.Key.telemetryInstallID)
               && !Settings.Key.all.contains(Settings.Key.telemetryInstallCreated)
               && !Settings.Key.all.contains(Settings.Key.telemetryLastAttempt),
@@ -166,9 +166,9 @@ struct SettingsTests {
 
         // Telemetry round trips; wrong types read as absent or default.
         s.telemetryEnabled = false
-        checkEq(s.telemetryEnabled, false, "telemetry: switch round trips")
+        checkEq(s.telemetryEnabled, false, "telemetry: opt-out round trips")
         store.set("no", forKey: Settings.Key.telemetryEnabled)
-        checkEq(s.telemetryEnabled, true, "telemetry: string switch falls back")
+        checkEq(s.telemetryEnabled, true, "telemetry: string opt-out falls back")
         s.telemetryLastAttempt = 1_756_800_000
         checkEq(s.telemetryLastAttempt, 1_756_800_000, "telemetry: attempt round trips")
         store.set("later", forKey: Settings.Key.telemetryLastAttempt)
@@ -281,7 +281,7 @@ struct SettingsTests {
                 "reset: spares recovery original")
         checkEq(store.string(forKey: "future.unknownKey"), "keep",
                 "reset: leaves unknown keys untouched")
-        // The switch is a preference (a reset turns the heartbeat back on);
+        // The opt-out is a preference (a reset turns the heartbeat back on);
         // the install identity and the attempt gate are bookkeeping and stay.
         checkEq(s.telemetryEnabled, true, "reset: usage stats back on")
         checkEq(s.telemetryInstallID, "0f0f0f0f-0000-4000-8000-000000000001",
