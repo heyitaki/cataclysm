@@ -244,19 +244,24 @@ final class AppRuntime {
             })
         }
         // The heartbeat (Telemetry.swift) runs only on the normal launch
-        // path. The ordering in main() is load-bearing: `--watch` and
-        // `--smoke-register` exit before start() is ever called, so neither
-        // the timer nor the immediate tick below exists in those processes.
-        // Each tick re-reads the switch, so turning it off cancels nothing in
-        // flight and simply leaves the next tick ineligible.
-        telemetry = Telemetry(settings: loaded, appVersion: appVersion)
-        telemetryTimer = Timer.scheduledTimer(withTimeInterval: Telemetry.tickInterval,
-                                              repeats: true) {
-            [weak self] _ in self?.telemetryTick()
+        // path of a release image: the Makefile writes CataclysmHeartbeat
+        // into Info.plist, true for `make dmg` and false for local builds,
+        // which then never mint an install id. The ordering in main() is
+        // load-bearing: `--watch` and `--smoke-register` exit before start()
+        // is ever called, so neither the timer nor the immediate tick below
+        // exists in those processes. Each tick re-reads the opt-out switch,
+        // so turning it off cancels nothing in flight and simply leaves the
+        // next tick ineligible.
+        if Bundle.main.infoDictionary?["CataclysmHeartbeat"] as? Bool == true {
+            telemetry = Telemetry(settings: loaded, appVersion: appVersion)
+            telemetryTimer = Timer.scheduledTimer(withTimeInterval: Telemetry.tickInterval,
+                                                  repeats: true) {
+                [weak self] _ in self?.telemetryTick()
+            }
+            // Deferred like the feature start above so the first send
+            // follows the rest of startup instead of interleaving with it.
+            DispatchQueue.main.async { self.telemetryTick() }
         }
-        // Deferred like the feature start above so the first send follows the
-        // rest of startup instead of interleaving with it.
-        DispatchQueue.main.async { self.telemetryTick() }
     }
 
     private func telemetryTick() {

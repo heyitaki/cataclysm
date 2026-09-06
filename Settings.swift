@@ -234,7 +234,8 @@ final class Settings {
 
     // Heartbeat opt-out. On by default and not exposed in the dropdown; a
     // `defaults write` of telemetry.enabled to false is the only way to turn
-    // it off.
+    // it off in a release image. Local builds have no heartbeat at all
+    // (CataclysmHeartbeat in Info.plist, written by the Makefile).
     var telemetryEnabled: Bool {
         get { bool(Key.telemetryEnabled, or: true) }
         set { defaults.set(newValue, forKey: Key.telemetryEnabled) }

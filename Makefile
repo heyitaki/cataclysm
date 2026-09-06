@@ -30,6 +30,13 @@ build/cataclysm-x86_64: $(APP_SOURCES) Bridging.h
 build/cataclysm: build/cataclysm-arm64 build/cataclysm-x86_64
 	lipo -create build/cataclysm-arm64 build/cataclysm-x86_64 -output $@
 
+# Only release images phone home: the daily heartbeat (Telemetry.swift) runs
+# when Info.plist carries CataclysmHeartbeat=true, which `make dmg` sets. A
+# plain `make` or `make install` writes false, so local builds never mint an
+# install id or land in the usage numbers.
+HEARTBEAT ?= false
+dmg: HEARTBEAT = true
+
 # Bundle assembly is cheap, so `app` rebuilds it every run rather than trusting
 # a directory mtime. Signing identity is self-signed; CSSMERR_TP_NOT_TRUSTED
 # from find-identity is expected, the working check is that codesign succeeds.
@@ -41,7 +48,7 @@ build/cataclysm: build/cataclysm-arm64 build/cataclysm-x86_64
 app: build/cataclysm build/Cataclysm.icns packaging/Info.plist.in packaging/$(BUNDLE_ID).watch.plist
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(APP)/Contents/Library/LaunchAgents
-	sed 's/__VERSION__/$(VERSION)/g' packaging/Info.plist.in > $(APP)/Contents/Info.plist
+	sed -e 's/__VERSION__/$(VERSION)/g' -e 's/__HEARTBEAT__/$(HEARTBEAT)/g' packaging/Info.plist.in > $(APP)/Contents/Info.plist
 	cp packaging/$(BUNDLE_ID).watch.plist $(APP)/Contents/Library/LaunchAgents/
 	cp build/Cataclysm.icns $(APP)/Contents/Resources/Cataclysm.icns
 	cp build/cataclysm $(APP)/Contents/MacOS/cataclysm
