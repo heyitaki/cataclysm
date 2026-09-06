@@ -249,7 +249,7 @@ final class AppRuntime {
         // the timer nor the immediate tick below exists in those processes.
         // Each tick re-reads the switch, so turning it off cancels nothing in
         // flight and simply leaves the next tick ineligible.
-        telemetry = Telemetry(settings: loaded, appVersion: appVersion())
+        telemetry = Telemetry(settings: loaded, appVersion: appVersion
         telemetryTimer = Timer.scheduledTimer(withTimeInterval: Telemetry.tickInterval,
                                               repeats: true) {
             [weak self] _ in self?.telemetryTick()
@@ -471,9 +471,8 @@ final class AppRuntime {
         watcherExecutable(inBundle: Bundle.main.bundleURL)
     }
 
-    private func appVersion() -> String {
+    let appVersion =
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-    }
 
     // The watcher agent always runs; it is not a user setting. A version
     // change unregisters first: SMAppService may not launch an agent whose
@@ -483,7 +482,7 @@ final class AppRuntime {
         guard let settings else { return }
         watcherProbeGeneration += 1
         let agent = SMAppService.agent(plistName: watcherPlistName)
-        let version = appVersion()
+        let version = appVersion
         let plan = watcherRegistrationPlan(
             statusEnabled: agent.status == .enabled,
             legacyCurrent: legacyWatcherCurrent(),
@@ -1173,7 +1172,17 @@ struct PanelView: View {
     private var mainPage: some View {
         Group {
             staticRow {
-                Text("Cataclysm").font(.headline)
+                // No update check in the panel: the version is what a player
+                // quotes in a bug report and compares against the download
+                // page by hand.
+                // Baseline-aligned so the smaller caption sits on the
+                // headline's text line rather than floating mid-height.
+                HStack(alignment: .lastTextBaseline, spacing: 6) {
+                    Text("Cataclysm").font(.headline)
+                    Text(AppRuntime.shared.appVersion)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Toggle("Cataclysm on", isOn: Binding(
                     get: { model.enabled },
@@ -1226,12 +1235,6 @@ struct PanelView: View {
             if state.loginItemRequiresApproval {
                 warningRow("Launch at login needs approval in Login Items…",
                            action: openLoginItems)
-            }
-            MenuRow(title: "Check for updates…") {
-                // Interim: opens the website's download page until the
-                // updater's state-driven row replaces this one.
-                let site = "https://akshath.me/cataclysm"
-                if let url = URL(string: site) { NSWorkspace.shared.open(url) }
             }
             MenuRow(title: "Quit Cataclysm") { AppRuntime.shared.quit() }
         }

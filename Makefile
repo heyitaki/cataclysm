@@ -1,4 +1,4 @@
-VERSION ?= 0.1.0
+VERSION ?= 1.0.0
 IDENTITY ?= Cataclysm
 BUNDLE_ID = io.github.heyitaki.cataclysm
 APP = build/Cataclysm.app
