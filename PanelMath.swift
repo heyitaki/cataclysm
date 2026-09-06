@@ -1,35 +1,30 @@
-// Pure math and formatting behind the panel's scroll speed slider: a
-// log-scaled 0.5x-10x track so 0.5x and 2.0x sit the same distance either
-// side of 1.0x, snapped to 0.25x steps. The slider's range
-// is deliberately not the persisted bound: a stored multiplier outside it is
-// legal, is never rewritten, and displays with the slider parked at the
-// nearer end. Foundation-only so the test harness links it without AppKit.
+// Pure math and formatting behind the panel's two speed sliders: scroll
+// spans 0.5x-10x in 0.25x steps, pointer 0.25x-4x in 0.05x steps. Log-scaled
+// tracks put equal ratios at equal distances. Their ranges are narrower
+// than the persisted bounds: a stored multiplier outside the track is never
+// rewritten and parks at the nearer end. Foundation-only so the test
+// harness links it without AppKit.
 
 import Foundation
 
-let sliderMultiplierMin = 0.5
-let sliderMultiplierMax = 10.0
+struct SliderScale {
+    let minimum: Double
+    let maximum: Double
+    let stepsPerUnit: Double
 
-// Track positions are natural-log multiplier values, so equal track distance
-// is equal ratio.
-let sliderPositionRange = log(sliderMultiplierMin)...log(sliderMultiplierMax)
+    var positionRange: ClosedRange<Double> { log(minimum)...log(maximum) }
 
-// Where the slider sits for a stored multiplier; out-of-slider-range values
-// park at the nearer end without being rewritten.
-func sliderPosition(forMultiplier multiplier: Double) -> Double {
-    log(min(max(multiplier, sliderMultiplierMin), sliderMultiplierMax))
+    func position(forMultiplier multiplier: Double) -> Double {
+        log(min(max(multiplier, minimum), maximum))
+    }
+
+    func multiplier(forPosition position: Double) -> Double {
+        (exp(position) * stepsPerUnit).rounded() / stepsPerUnit
+    }
 }
 
-// Snap grid for the slider: 4 steps per 1.0x, so the readout only ever
-// shows a multiple of 0.25x (1.00x, 1.25x, 1.50x) and the stored value agrees
-// with it exactly. Quarters are exact in binary, so n / 4 is the literal
-// decimal with no rounding.
-let sliderStepsPerUnit = 4.0
-
-// The multiplier a track position means, snapped to the step grid.
-func multiplier(forSliderPosition position: Double) -> Double {
-    (exp(position) * sliderStepsPerUnit).rounded() / sliderStepsPerUnit
-}
+let scrollSpeedScale = SliderScale(minimum: 0.5, maximum: 10, stepsPerUnit: 4)
+let pointerSpeedScale = SliderScale(minimum: 0.25, maximum: 4, stepsPerUnit: 20)
 
 // Storage form. The slider can only produce in-slider-range values, so the
 // Settings setter's clamp is the only bound this needs.

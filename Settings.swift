@@ -1,6 +1,6 @@
 // Settings: the UserDefaults-backed store behind every panel control.
 // Validation happens on every read, not only in the UI: out-of-bounds
-// numbers are clamped (multiplier 0.001-100
+// numbers are clamped (scroll multiplier 0.001-100 and pointer speed 0.1-10
 // stored as thousandths, lines per notch 1-1000, corner radius 0-200), a
 // value of the wrong type or non-finite falls back to its default, and keys
 // this version does not know are left untouched so a downgrade keeps a newer
@@ -11,7 +11,7 @@
 // recovery.-prefixed keys are recovery metadata, not preferences. They are
 // deliberately absent from Key.all, so resetToDefaults() can never erase the
 // only record of the user's real acceleration value while the live property
-// is held at -1.
+// is held by the app.
 
 import Foundation
 
@@ -23,6 +23,7 @@ final class Settings {
         static let targetDisplayName = "jail.targetDisplayName"
         static let cornerRadius = "jail.cornerRadius"
         static let accelerationOff = "accel.disabled"
+        static let pointerSpeedThousandths = "pointer.speedThousandths"
         static let invertVertical = "scroll.invertVertical"
         static let invertHorizontal = "scroll.invertHorizontal"
         static let flattenNotches = "scroll.flatten"
@@ -52,7 +53,8 @@ final class Settings {
         // turns the heartbeat back on for a user who had switched it off.
         static let all = [
             enabled, jailEnabled, targetBundleID, targetDisplayName, cornerRadius,
-            accelerationOff, invertVertical, invertHorizontal, flattenNotches,
+            accelerationOff, pointerSpeedThousandths,
+            invertVertical, invertHorizontal, flattenNotches,
             linesPerNotch, mulThousandths, altTrackpadDetection,
             hotkeyKeyCode, hotkeyModifiers, launchAtLogin, telemetryEnabled,
         ]
@@ -71,6 +73,7 @@ final class Settings {
         static let cornerRadius = 18.0
         static let linesPerNotch = 1
         static let mulThousandths = 1_000
+        static let pointerSpeedThousandths = 1_000
         // cmd+alt+L, the chord the retired Hammerspoon helper shipped. Raw
         // Carbon values
         // (kVK_ANSI_L, cmdKey | optionKey) so this file needs no Carbon
@@ -159,6 +162,17 @@ final class Settings {
     var accelerationOff: Bool {
         get { bool(Key.accelerationOff, or: true) }
         set { defaults.set(newValue, forKey: Key.accelerationOff) }
+    }
+
+    var pointerSpeedThousandths: Int {
+        get {
+            clampedPointerSpeedThousandths(
+                int(Key.pointerSpeedThousandths, or: Default.pointerSpeedThousandths))
+        }
+        set {
+            defaults.set(clampedPointerSpeedThousandths(newValue),
+                         forKey: Key.pointerSpeedThousandths)
+        }
     }
 
     var invertVertical: Bool {
@@ -277,7 +291,7 @@ final class Settings {
     // "Reset to defaults": erase the settings a person chose,
     // never anything recovery.-prefixed, and leave unknown keys (a newer
     // version's settings) alone. Reapplying the live defaults immediately
-    // (writing -1 to the acceleration property again, not restoring) is the
+    // (holding acceleration off at the default speed again) is the
     // caller's job; this store only owns persistence.
     func resetToDefaults() {
         for key in Key.all {
@@ -288,4 +302,8 @@ final class Settings {
 
 func clampedCornerRadius(_ raw: Double) -> Double {
     min(max(raw, 0), 200)
+}
+
+func clampedPointerSpeedThousandths(_ raw: Int) -> Int {
+    min(max(raw, 100), 10_000)
 }

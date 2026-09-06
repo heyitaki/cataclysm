@@ -102,6 +102,7 @@ final class AppState: ObservableObject {
     // lost grant keeps the property held (stopFeatures leaves it alone), so
     // !trusted on its own cannot stand in for this.
     @Published var accelHeld = false
+    @Published var pointerSpeedAvailable = false
     @Published var watcherRegistered = false
     @Published var watcherRequiresApproval = false
     // register() threw (SMAppService path) and the legacy bootstrap failed
@@ -128,6 +129,7 @@ final class SettingsModel: ObservableObject {
     @Published var invertVertical = true
     @Published var launchAtLogin = true
     @Published var mulThousandths = 1_000
+    @Published var pointerSpeedThousandths = 1_000
     @Published var targetBundleID = ""
     @Published var pickerRows: [GamePickerRow] = []
     @Published var invertHorizontal = true
@@ -309,6 +311,7 @@ final class AppRuntime {
         panel.invertVertical = settings.invertVertical
         panel.launchAtLogin = settings.launchAtLogin
         panel.mulThousandths = settings.mulThousandths
+        panel.pointerSpeedThousandths = settings.pointerSpeedThousandths
         panel.targetBundleID = settings.targetBundleID
         panel.invertHorizontal = settings.invertHorizontal
         panel.flattenNotches = settings.flattenNotches
@@ -423,11 +426,18 @@ final class AppRuntime {
         // is re-enabled rather than replaced, so its claim and stored
         // original carry over. enable() is idempotent for a live instance.
         if let pointerAccel {
+            pointerAccel.setSpeed(thousandths: settings?.pointerSpeedThousandths
+                                  ?? Settings.Default.pointerSpeedThousandths)
             pointerAccel.enable()
             state.accelHeld = true
             return
         }
-        let accel = PointerAccel()
+        let accel = PointerAccel(speedThousandths: settings?.pointerSpeedThousandths
+                                 ?? Settings.Default.pointerSpeedThousandths)
+        state.pointerSpeedAvailable = accel.linearAvailable
+        accel.onLinearAvailabilityChange = { [weak self] available in
+            self?.state.pointerSpeedAvailable = available
+        }
         accel.onWriteHealthChange = { [weak self] healthy in
             self?.state.accelWriteFailing = !healthy
             // A healthy write proves the client round-trips too.
@@ -450,7 +460,7 @@ final class AppRuntime {
         state.accelUnresponsive = !pointerAccel.clientResponsive
         // A failed disable() (setAccelerationOff) keeps the instance with
         // its claim; writeFailing alone would read false and clear the
-        // failure the toggle showed, while the property is still -1.
+        // failure the toggle showed, while the properties are still held.
         state.accelWriteFailing = pointerAccel.writeFailing || pointerAccel.restoreFailed
     }
 
@@ -816,13 +826,14 @@ final class AppRuntime {
         if accel.disable() {
             pointerAccel = nil
             state.accelHeld = false
+            state.pointerSpeedAvailable = false
             state.accelWriteFailing = false
             state.accelUnresponsive = false
         } else {
-            // The property still reads -1 and the original could not be
+            // The properties are still held and the original could not be
             // written back. The instance stays: its claim and stored
             // original are what a later restore (the next toggle cycle or
-            // quit) puts back, and dropping it would leave -1 held by nobody
+            // quit) puts back, and dropping it would leave them held by nobody
             // after deinit's one retry. The toggle must read failed, not
             // off, same as a failed enable.
             state.accelWriteFailing = true
@@ -840,6 +851,13 @@ final class AppRuntime {
         // Read back so the mirror carries what storage actually clamped to.
         panel.mulThousandths = settings?.mulThousandths ?? thousandths
         applyScrollConfigs()
+    }
+
+    func setPointerSpeedThousandths(_ thousandths: Int) {
+        settings?.pointerSpeedThousandths = thousandths
+        panel.pointerSpeedThousandths = settings?.pointerSpeedThousandths
+            ?? clampedPointerSpeedThousandths(thousandths)
+        pointerAccel?.setSpeed(thousandths: panel.pointerSpeedThousandths)
     }
 
     func setLaunchAtLogin(_ on: Bool) {
@@ -910,13 +928,13 @@ final class AppRuntime {
 
     // "Reset to defaults": erase chosen settings (never
     // recovery.-prefixed keys; the store enforces that) and reapply the
-    // defaults immediately. For acceleration that means writing -1 again,
-    // not restoring: the default is on, so a running feature keeps holding
-    // and a stopped one starts.
+    // defaults immediately. Acceleration stays off at the default speed:
+    // a running feature keeps holding and a stopped one starts.
     func resetToDefaults() {
         guard let settings else { return }
         settings.resetToDefaults()
         applySettings()
+        pointerAccel?.setSpeed(thousandths: settings.pointerSpeedThousandths)
         applyHotkey()
         syncLoginItem()
         // The reset restores the master switch to on; if it was off, the
@@ -971,7 +989,7 @@ final class AppRuntime {
     }
 
     // Restore on every exit path: a stale disconnect leaves the cursor frozen
-    // and a stale -1 leaves acceleration off. Raw signal handlers calling
+    // and a held HID property leaves acceleration off. Raw signal handlers calling
     // CoreGraphics can deadlock against the tap thread's CG locks, so use
     // dispatch sources; both run on the main thread, which restore() requires.
     private func installExitRestorers() {
@@ -1121,6 +1139,87 @@ struct OnboardingView: View {
 
 // MARK: - Panel
 
+struct SpeedSliderRow: View {
+    let title: String
+    let scale: SliderScale
+    let thousandths: Int
+    let isDisabled: Bool
+    var caption: String? = nil
+    let set: (Int) -> Void
+
+    // Commit on release: moving outside the panel dismisses it, so a live
+    // cursor-speed preview cannot be tried while dragging.
+    @State private var sliderPos = 0.0
+    @State private var draggingSlider = false
+    @State private var dragStartPos = 0.0
+
+    // An unmoved thumb preserves stored values off the snap grid or outside
+    // the track. This stays independent of draggingSlider, which clears
+    // before commitSlider runs.
+    private var sliderMoved: Bool { sliderPos != dragStartPos }
+
+    var body: some View {
+        let readout = draggingSlider && sliderMoved
+            ? mulThousandths(forMultiplier: scale.multiplier(forPosition: sliderPos))
+            : thousandths
+        HStack(spacing: 6) {
+            Text(title).fixedSize()
+
+            // The unavailable caption occupies the inactive track, keeping
+            // the readout and reset in place within the 320-point panel.
+            Slider(value: $sliderPos, in: scale.positionRange) { editing in
+                if editing { dragStartPos = sliderPos }
+                draggingSlider = editing
+                if !editing { commitSlider() }
+            }
+            .accessibilityLabel(title)
+            .opacity(caption == nil ? 1 : 0)
+            .accessibilityHidden(caption != nil)
+            .overlay(alignment: .trailing) {
+                if let caption {
+                    Text(caption).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            // Reserve the widest in-range readout so the track stays still
+            // when the multiplier reaches two digits.
+            ZStack(alignment: .trailing) {
+                Text(multiplierLabel(forThousandths: mulThousandths(forMultiplier: scale.maximum)))
+                    .hidden()
+                Text(multiplierLabel(forThousandths: readout))
+            }
+            .monospacedDigit()
+            .fixedSize()
+            Button {
+                set(1_000)
+                syncPosition(thousandths: 1_000)
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+            }
+            .buttonStyle(.borderless)
+            .help("Reset to 1.00x")
+        }
+        .frame(maxWidth: .infinity, minHeight: menuRowHeight, alignment: .leading)
+        .padding(.horizontal, menuRowInset)
+        .disabled(isDisabled)
+        .onAppear { syncPosition(thousandths: thousandths) }
+        .onChange(of: thousandths) { syncPosition(thousandths: $0) }
+    }
+
+    private func commitSlider() {
+        guard sliderMoved else { return }
+        let value = mulThousandths(forMultiplier: scale.multiplier(forPosition: sliderPos))
+        set(value)
+        syncPosition(thousandths: value)
+    }
+
+    private func syncPosition(thousandths: Int) {
+        sliderPos = scale.position(forMultiplier: Double(thousandths) / 1_000)
+        dragStartPos = sliderPos
+    }
+}
+
 struct CataclysmApp: App {
     @ObservedObject private var panel = AppRuntime.shared.panel
     @ObservedObject private var state = AppRuntime.shared.state
@@ -1131,7 +1230,7 @@ struct CataclysmApp: App {
     private static let engagedIcon = makeMenuBarIcon(.engaged)
 
     var body: some Scene {
-        // `.window` style because the scroll slider does not
+        // `.window` style because the speed sliders do not
         // render in `.menu`.
         MenuBarExtra {
             PanelView(state: AppRuntime.shared.state, model: AppRuntime.shared.panel)
@@ -1151,19 +1250,6 @@ struct CataclysmApp: App {
 struct PanelView: View {
     @ObservedObject var state: AppState
     @ObservedObject var model: SettingsModel
-    // View-local drag state; committed to storage on release, since the panel
-    // dismisses on outside clicks and live preview is impossible anyway.
-    @State private var sliderPos = 0.0
-    @State private var draggingSlider = false
-    @State private var dragStartPos = 0.0
-    // Whether the current drag has moved the thumb off where it was grabbed.
-    // An unmoved thumb neither previews nor commits: the stored value may sit
-    // off the snap grid (an older install's 1.37x) or beyond the slider's
-    // range, parked at the nearer end by design, and snapping it would
-    // flicker the readout on mouse-down or collapse the value to the bound.
-    // Deliberately independent of draggingSlider: commitSlider runs after
-    // that flag is already cleared, so folding it in would block every commit.
-    private var sliderMoved: Bool { sliderPos != dragStartPos }
     // Which page shows; every open starts on the main page.
     @State private var showingAdvanced = false
 
@@ -1189,9 +1275,6 @@ struct PanelView: View {
             AppRuntime.shared.refreshWatcherStatus()
             AppRuntime.shared.refreshLoginItemStatus()
             AppRuntime.shared.refreshAccelHealth()
-            sliderPos = sliderPosition(
-                forMultiplier: Double(model.mulThousandths) / 1_000)
-            dragStartPos = sliderPos
         }
     }
 
@@ -1239,6 +1322,7 @@ struct PanelView: View {
             gameRow
             menuDivider
             accelToggle
+            pointerSpeedRow
             // A downed tap holds nothing a click could undo, so these
             // tap-backed toggles pass held: false and disable while failed;
             // only the acceleration toggle keeps a live retry (accelHeld).
@@ -1247,7 +1331,10 @@ struct PanelView: View {
                           failed: scrollFailed,
                           held: false,
                           set: { AppRuntime.shared.setInvertVertical($0) })
-            sliderRow
+            SpeedSliderRow(title: "Scroll speed", scale: scrollSpeedScale,
+                           thousandths: model.mulThousandths,
+                           isDisabled: !state.trusted || scrollFailed || !model.enabled,
+                           set: { AppRuntime.shared.setMulThousandths($0) })
             menuDivider
             MenuRow(title: "Advanced", trailingSymbol: "chevron.right") {
                 showingAdvanced = true
@@ -1305,10 +1392,6 @@ struct PanelView: View {
             menuDivider
             MenuRow(title: "Reset to defaults") {
                 AppRuntime.shared.resetToDefaults()
-                // sliderPos is view-local drag state; resync it to the
-                // freshly reset stored multiplier.
-                sliderPos = sliderPosition(forMultiplier:
-                    Double(AppRuntime.shared.panel.mulThousandths) / 1_000)
             }
         }
     }
@@ -1457,7 +1540,7 @@ struct PanelView: View {
     // would claim a curve that is still accelerating. Once held, a lost grant
     // does not release the property, so the toggle stays live. `held` is
     // accelHeld rather than the stored value: after a failed restore the
-    // setting reads off while the property is still -1, and a click here is
+    // setting reads off while the properties are still held, and a click here is
     // the only retry of that restore the panel offers.
     private var accelToggle: some View {
         featureToggle("Disable mouse acceleration",
@@ -1499,46 +1582,19 @@ struct PanelView: View {
         }
     }
 
-    private var sliderRow: some View {
-        // Mid-drag the readout previews the snapped release value; otherwise
-        // it shows the stored value.
-        let readout = draggingSlider && sliderMoved
-            ? mulThousandths(forMultiplier: multiplier(forSliderPosition: sliderPos))
-            : model.mulThousandths
-        return staticRow {
-            Text("Scroll speed")
-            Slider(value: $sliderPos, in: sliderPositionRange) { editing in
-                if editing { dragStartPos = sliderPos }
-                draggingSlider = editing
-                if !editing { commitSlider() }
-            }
-            // Sized to the widest in-range readout so the slider does not
-            // shrink when the value reaches two digits.
-            ZStack(alignment: .trailing) {
-                Text(multiplierLabel(forThousandths: mulThousandths(forMultiplier: sliderMultiplierMax)))
-                    .hidden()
-                Text(multiplierLabel(forThousandths: readout))
-            }
-            .monospacedDigit()
-            Button {
-                AppRuntime.shared.setMulThousandths(1_000)
-                sliderPos = sliderPosition(forMultiplier: 1.0)
-            } label: {
-                Image(systemName: "arrow.counterclockwise")
-            }
-            .buttonStyle(.borderless)
-            .help("Reset to 1.00x")
-        }
-        .disabled(!state.trusted || scrollFailed || !model.enabled)
+    private var pointerSpeedRow: some View {
+        SpeedSliderRow(title: "Pointer speed", scale: pointerSpeedScale,
+                       thousandths: model.pointerSpeedThousandths,
+                       isDisabled: !(model.enabled && model.accelOff && state.accelHeld
+                                     && state.pointerSpeedAvailable),
+                       caption: pointerSpeedCaption,
+                       set: { AppRuntime.shared.setPointerSpeedThousandths($0) })
     }
 
-    private func commitSlider() {
-        guard sliderMoved else { return }
-        let thousandths = mulThousandths(
-            forMultiplier: multiplier(forSliderPosition: sliderPos))
-        AppRuntime.shared.setMulThousandths(thousandths)
-        sliderPos = sliderPosition(
-            forMultiplier: Double(AppRuntime.shared.panel.mulThousandths) / 1_000)
+    private var pointerSpeedCaption: String? {
+        guard state.accelHeld && !state.pointerSpeedAvailable else { return nil }
+        if #available(macOS 14, *) { return "unavailable on this Mac" }
+        return "needs macOS 14"
     }
 
     // Minus, value, plus: reads as "less or more" at a glance, which the

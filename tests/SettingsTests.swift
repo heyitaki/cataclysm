@@ -79,6 +79,7 @@ struct SettingsTests {
         checkEq(s.flattenNotches, true, "default: flatten on")
         checkEq(s.linesPerNotch, 1, "default: 1 line per notch")
         checkEq(s.mulThousandths, 1_000, "default: multiplier 1.0")
+        checkEq(s.pointerSpeedThousandths, 1_000, "default: pointer speed 1.0")
         checkEq(s.altTrackpadDetection, false, "default: alt detection off")
         checkEq(s.hotkeyKeyCode, 37, "default: hotkey key L")
         checkEq(s.hotkeyModifiers, 0x0100 | 0x0800, "default: hotkey cmd+alt")
@@ -134,6 +135,18 @@ struct SettingsTests {
         checkEq(s.mulThousandths, 50_000, "mul: 50x is legal beyond the slider")
         checkEq(store.object(forKey: Settings.Key.mulThousandths) as? Int, 50_000,
                 "mul: read does not rewrite storage")
+
+        // Pointer speed: 0.1x to 10x, stored as thousandths like the wheel.
+        store.set(0, forKey: Settings.Key.pointerSpeedThousandths)
+        checkEq(s.pointerSpeedThousandths, 100, "pointer: 0 clamps to lower bound")
+        store.set(50_000, forKey: Settings.Key.pointerSpeedThousandths)
+        checkEq(s.pointerSpeedThousandths, 10_000, "pointer: 50000 clamps to upper bound")
+        store.set("fast", forKey: Settings.Key.pointerSpeedThousandths)
+        checkEq(s.pointerSpeedThousandths, 1_000, "pointer: string falls back to default")
+        store.set(true, forKey: Settings.Key.pointerSpeedThousandths)
+        checkEq(s.pointerSpeedThousandths, 1_000, "pointer: bool falls back to default")
+        store.set(6_000, forKey: Settings.Key.pointerSpeedThousandths)
+        checkEq(s.pointerSpeedThousandths, 6_000, "pointer: 6x is legal beyond the slider")
 
         // Corner radius: 0...200, non-finite falls back to the default.
         store.set(-5.0, forKey: Settings.Key.cornerRadius)
@@ -193,6 +206,9 @@ struct SettingsTests {
         s.mulThousandths = 0
         checkEq(store.object(forKey: Settings.Key.mulThousandths) as? Int, 1,
                 "mul: setter clamps into storage")
+        s.pointerSpeedThousandths = 0
+        checkEq(store.object(forKey: Settings.Key.pointerSpeedThousandths) as? Int, 100,
+                "pointer: setter clamps into storage")
 
         // The per-axis snapshots pair each axis's inversion with the shared
         // flatten/lines/multiplier.
@@ -255,6 +271,7 @@ struct SettingsTests {
         let s = Settings(defaults: store)
         s.jailEnabled = false
         s.linesPerNotch = 7
+        s.pointerSpeedThousandths = 2_500
         s.targetBundleID = "com.example.game"
         s.lastRegisteredVersion = "0.9.0"
         s.telemetryEnabled = false
@@ -270,6 +287,7 @@ struct SettingsTests {
         checkEq(s.jailEnabled, true, "reset: jail back to default")
         checkEq(s.enabled, true, "reset: master switch back on")
         checkEq(s.linesPerNotch, 1, "reset: lines back to default")
+        checkEq(s.pointerSpeedThousandths, 1_000, "reset: pointer speed back to default")
         checkEq(s.targetBundleID, "com.riotgames.LeagueofLegends.GameClient",
                 "reset: target back to default")
         // Bookkeeping, not a preference: clearing it would force a watcher
