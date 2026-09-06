@@ -67,8 +67,47 @@ struct Clamp {
 // - fullscreen: native fullscreen (the AX flag), where the game confines the
 //   cursor itself and a second capture on top would fight its warps. The
 //   jail releases.
-enum WindowMode {
+enum WindowMode: Equatable {
     case windowed, borderless, fullscreen
+}
+
+// One on-screen window as the window server reports it, for the fallback
+// below.
+struct WindowListEntry: Equatable {
+    let bounds: CGRect
+    let layer: Int
+}
+
+// The window-server fallback's verdict: nothing usable, a display-sized
+// window (release), or a frame with the mode the clamp should use.
+enum FallbackWindow: Equatable {
+    case none
+    case fullscreen
+    case window(mode: WindowMode, frame: CGRect)
+}
+
+// The size floor rejects chrome, tooltips and splash windows.
+let minimumFallbackSide: CGFloat = 200
+
+func fallbackWindow(entries: [WindowListEntry], displays: [CGRect]) -> FallbackWindow {
+    var largest: WindowListEntry?
+    var largestArea: CGFloat = 0
+    for entry in entries where entry.bounds.width >= minimumFallbackSide
+        && entry.bounds.height >= minimumFallbackSide {
+        let area = entry.bounds.width * entry.bounds.height
+        // The list is front to back, so an area tie keeps the earlier entry.
+        guard area > largestArea else { continue }
+        largest = entry
+        largestArea = area
+    }
+    guard let largest = largest else { return .none }
+
+    // A display-sized window cannot be told from native fullscreen without
+    // Accessibility. Fighting the game's own cursor capture is worse, so release.
+    if displays.contains(largest.bounds) { return .fullscreen }
+
+    // Layer 0 has macOS chrome. League's borderless window sits at level 1000.
+    return .window(mode: largest.layer == 0 ? .windowed : .borderless, frame: largest.bounds)
 }
 
 // The flag goes first because native fullscreen can keep the standard

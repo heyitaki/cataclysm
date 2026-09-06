@@ -1,6 +1,7 @@
-// Jail engagement state and AX window measurement: the pure clamp geometry
-// lives in JailMath.swift; this file owns the AX reads and the
-// engaged/virtual-position bookkeeping the tap callback integrates against.
+// Jail engagement state and window measurement: the pure clamp geometry lives
+// in JailMath.swift. AX failures keep its last rect once it has measured this
+// engagement. Until then the window server supplies the bounds. This file owns
+// both reads and the engaged/virtual-position bookkeeping for the tap callback.
 
 import Cocoa
 
@@ -19,9 +20,12 @@ private let axTimeoutInstalled: Bool = {
 // managers read.
 let axFullScreenAttribute = "AXFullScreen"
 
+enum ClampSource { case ax, windowList }
+
 // Main-thread only: the tap source, timer, and notifications share the main
 // run loop. Moving any of them off it would need synchronization here.
 var clampArea: Clamp?
+var clampSource: ClampSource?
 var virtualPos = CGPoint.zero
 var engaged = false
 // Engage and release transitions publish to the panel state so the menu bar
@@ -112,8 +116,9 @@ func axRect(_ el: AXUIElement) -> AXRead<CGRect> {
     }
 }
 
-// One AX measurement of the game window. unreadable is a transient AX
-// failure (the caller keeps its last rect); fullscreen asks for release.
+// One AX measurement of the game window. unreadable keeps the last AX rect,
+// or tries the window server if AX has never measured this engagement.
+// fullscreen asks for release.
 enum GameWindow {
     case unreadable, fullscreen, clamp(Clamp)
 }
@@ -149,6 +154,32 @@ func gameWindow(_ app: NSRunningApplication) -> GameWindow {
     return .clamp(clamp)
 }
 
+// The window server's answer for the game's window, used while AX has not
+// measured: it never blocks on the game, so a stalled main thread cannot
+// keep the jail from engaging. Alpha 0 windows are hidden surfaces.
+func windowListWindow(_ app: NSRunningApplication) -> FallbackWindow {
+    guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                 kCGNullWindowID) as? [[String: Any]] else { return .none }
+    let entries = windows.compactMap { info -> WindowListEntry? in
+        guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+              pid == app.processIdentifier,
+              (info[kCGWindowAlpha as String] as? CGFloat ?? 1) > 0,
+              let bounds = info[kCGWindowBounds as String] as? [String: Any],
+              let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+              let layer = info[kCGWindowLayer as String] as? Int else { return nil }
+        return WindowListEntry(bounds: frame, layer: layer)
+    }
+    var count: UInt32 = 0
+    guard CGGetActiveDisplayList(0, nil, &count) == .success else { return .none }
+    var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    guard CGGetActiveDisplayList(count, &displays, &count) == .success else { return .none }
+
+    // The window list and CGDisplayBounds use the same top-left global
+    // coordinates as the AX reads and CGWarpMouseCursorPosition, so nothing
+    // converts; NSScreen frames are bottom-left and would not do.
+    return fallbackWindow(entries: entries, displays: displays.prefix(Int(count)).map(CGDisplayBounds))
+}
+
 func setEngaged(_ on: Bool) {
     if on == engaged { return }
     engaged = on
@@ -171,6 +202,7 @@ func setEngaged(_ on: Bool) {
 
 func releaseJail() {
     clampArea = nil
+    clampSource = nil
     setEngaged(false)
 }
 
@@ -184,10 +216,23 @@ func refresh() {
     switch gameWindow(front) {
     case .clamp(let c):
         clampArea = c
+        clampSource = .ax
     case .unreadable:
-        // Keep the last known rect. Releasing the cursor for a blip would let
-        // it escape.
-        break
+        // Accessibility sees the close button, subrole and fullscreen flag, so
+        // its measurement is better. Once it has measured, a transient failure
+        // keeps its rect. The window server only stands in while Accessibility
+        // has never answered for this engagement.
+        if clampSource == .ax { break }
+        switch windowListWindow(front) {
+        case .fullscreen:
+            return releaseJail()
+        case .window(let mode, let frame):
+            clampArea = jailClamp(mode: mode, frame: frame, closeButton: nil,
+                                  cornerRadius: cornerRadius)
+            if clampArea != nil { clampSource = .windowList }
+        case .none:
+            break
+        }
     case .fullscreen:
         return releaseJail()
     }

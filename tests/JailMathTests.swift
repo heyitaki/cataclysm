@@ -1,7 +1,8 @@
 // Harness for the pure jail geometry (JailMath.swift): the rounded-rect
 // clamp's corner projection, radius capping, title-bar shrink, the
-// title-bar inference rules, and the display-mode classification. Pure
-// functions; no AX, no windows.
+// title-bar inference rules, the display-mode classification, and the
+// window-server fallback's window selection. Pure functions; no AX, no
+// windows.
 //
 // Build and run: make test
 
@@ -32,6 +33,7 @@ struct JailMathTests {
         titleBarTests()
         windowModeTests()
         jailClampTests()
+        fallbackWindowTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
     }
@@ -175,5 +177,59 @@ struct JailMathTests {
         check(jailClamp(mode: .borderless, frame: CGRect(x: 0, y: 0, width: 1, height: 100),
                         closeButton: nil, cornerRadius: 18) == nil,
               "a frame too thin to inset yields no clamp")
+    }
+
+    // The window-server fallback (fallbackWindow): the jail's measurement
+    // when the Accessibility read fails, pure over what
+    // CGWindowListCopyWindowInfo reports and the display frames.
+    static func fallbackWindowTests() {
+        let display = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        let second = CGRect(x: 2560, y: 0, width: 1920, height: 1080)
+        let displays = [display, second]
+        func entry(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat,
+                   layer: Int = 0) -> WindowListEntry {
+            WindowListEntry(bounds: CGRect(x: x, y: y, width: w, height: h), layer: layer)
+        }
+
+        checkEq(fallbackWindow(entries: [], displays: displays), .none,
+                "no windows yields nothing")
+        // Anything under 200 points on a side is chrome, a tooltip, or a
+        // splash, never the game's surface.
+        checkEq(fallbackWindow(entries: [entry(100, 100, 199, 600), entry(0, 0, 600, 199)],
+                               displays: displays),
+                .none, "windows under the size floor are ignored")
+        // The largest window wins, whatever its order in the list.
+        checkEq(fallbackWindow(entries: [entry(10, 10, 300, 250), entry(640, 360, 1280, 720)],
+                               displays: displays),
+                .window(mode: .windowed, frame: CGRect(x: 640, y: 360, width: 1280, height: 720)),
+                "the largest window is the game's")
+        // A window past the floor on one side but not the other never beats a
+        // qualifying one, however wide it is.
+        checkEq(fallbackWindow(entries: [entry(0, 0, 2000, 150), entry(0, 200, 400, 300)],
+                               displays: displays),
+                .window(mode: .windowed, frame: CGRect(x: 0, y: 200, width: 400, height: 300)),
+                "a wide strip does not outrank a real window")
+        // Equal areas: the list is front to back, so the earlier entry is the
+        // one in front.
+        checkEq(fallbackWindow(entries: [entry(0, 0, 800, 600), entry(100, 100, 800, 600)],
+                               displays: displays),
+                .window(mode: .windowed, frame: CGRect(x: 0, y: 0, width: 800, height: 600)),
+                "an area tie keeps the frontmost window")
+        // Layer 0 is a normal window with macOS chrome; anything else (League's
+        // borderless window sits at level 1000) is bare.
+        checkEq(fallbackWindow(entries: [entry(320, 180, 1920, 1080, layer: 1000)],
+                               displays: displays),
+                .window(mode: .borderless, frame: CGRect(x: 320, y: 180, width: 1920, height: 1080)),
+                "a window off layer 0 is borderless")
+        // A window covering a display exactly cannot be told from native
+        // fullscreen without Accessibility, so the jail releases.
+        checkEq(fallbackWindow(entries: [entry(0, 0, 2560, 1440, layer: 1000)], displays: displays),
+                .fullscreen, "a display-sized window on the main display releases")
+        checkEq(fallbackWindow(entries: [entry(2560, 0, 1920, 1080)], displays: displays),
+                .fullscreen, "a display-sized window on a second display releases")
+        // Display-sized on one side only is a big window, not fullscreen.
+        checkEq(fallbackWindow(entries: [entry(0, 0, 2560, 1400)], displays: displays),
+                .window(mode: .windowed, frame: CGRect(x: 0, y: 0, width: 2560, height: 1400)),
+                "a window one side short of the display is still a window")
     }
 }
