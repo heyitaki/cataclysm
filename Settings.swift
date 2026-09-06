@@ -47,7 +47,7 @@ final class Settings {
         // Everything resetToDefaults() erases. recovery.-prefixed keys,
         // lastRegisteredVersion and the telemetry.* bookkeeping above are
         // not preferences: erasing the version would force a needless
-        // watcher re-register cycle with its 10s uncovered probe window on
+        // watcher re-register cycle with its 15s uncovered probe window on
         // the next launch. telemetryEnabled is a preference, so a reset
         // turns the heartbeat back on for a user who had switched it off.
         static let all = [

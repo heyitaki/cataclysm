@@ -10,6 +10,19 @@
 import Foundation
 import ServiceManagement
 
+// The one spawn proof the gate and the runtime share: a live pid under the
+// label whose true executable is `bundleExecutable`. Here rather than beside
+// pollLaunchctlPrint because Watcher.swift and Smoke.swift each compile alone
+// into a test binary and this needs both. (Not named `executablePath`: a
+// local of that name would shadow `executablePath(ofPid:)`.)
+func pollWatcherSpawn(label: String, bundleExecutable: String)
+    -> (code: Int32, output: String, resolved: Bool) {
+    pollLaunchctlPrint(label: label) {
+        launchctlPidResolvesExecutable($0, executablePath: bundleExecutable,
+                                       pathForPid: executablePath(ofPid:))
+    }
+}
+
 final class SmokeGate {
     // Label, plist path, and executable path come from the shared derivations
     // in Watcher.swift, so the gate validates exactly what the runtime uses.
@@ -81,9 +94,10 @@ final class SmokeGate {
             print("SMOKE PASS (SMAppService)")
             return 0
         }
-        // SMAppService refused. The app's runtime falls back to the legacy
-        // LaunchAgents job in exactly this case, so the gate repeats the same
-        // check through that mechanism.
+        // SMAppService refused, or accepted a job launchd never spawned. The
+        // app's runtime falls back to the legacy LaunchAgents job in exactly
+        // these cases, so the gate repeats the same check through that
+        // mechanism.
         cleanupSM()
         // A PASS must leave no registered agent; while the SM agent cannot be
         // torn down, a legacy pass would print PASS over live residue.
@@ -98,7 +112,7 @@ final class SmokeGate {
                 print("SMOKE FAIL")
                 return 1
             }
-            print("SMOKE PASS (legacy bootstrap; SMAppService refused)")
+            print("SMOKE PASS (legacy bootstrap; SMAppService refused or never spawned)")
             return 0
         }
         print("SMOKE FAIL")
@@ -137,7 +151,7 @@ final class SmokeGate {
         return pass
     }
 
-    // register → status readback → launchctl print resolution → unregister.
+    // register → status readback → launchctl print spawn → unregister.
     private func smAppServicePath() -> Bool {
         do {
             try agent.register()
@@ -151,22 +165,7 @@ final class SmokeGate {
         guard step("status readback is enabled", status == .enabled,
                    detail: "status rawValue = \(status.rawValue)")
         else { return false }
-        // BundleProgram stays relative in the print dump until launchd spawns
-        // the job ("program identifier = Contents/MacOS/cataclysm", "resolve
-        // program"), so resolution is proven by whichever appears first: the
-        // absolute path in the dump, or the spawned pid's true executable
-        // (proc_pidpath) matching the in-bundle path.
-        let (printCode, output, resolved) = pollLaunchctlPrint(label: watcherLabel) {
-            smokeResolution(output: $0, executablePath: executablePath,
-                            pathForPid: executablePath(ofPid:))
-        }
-        guard step("launchctl print shows the job", printCode == 0,
-                   detail: "exit \(printCode): \(firstLine(of: output))")
-        else { return false }
-        guard step("executable resolved inside the bundle", resolved,
-                   detail: "expected \(executablePath); launchd has "
-                       + programLines(of: output))
-        else { return false }
+        guard spawnSteps(job: "job") else { return false }
         do {
             try agent.unregister()
             smRegistered = false
@@ -177,8 +176,7 @@ final class SmokeGate {
         }
     }
 
-    // write plist → bootstrap → launchctl print resolution → bootout →
-    // delete. The legacy job carries an absolute ProgramArguments path
+    // write plist → bootstrap → launchctl print spawn → bootout → delete. The legacy job carries an absolute ProgramArguments path
     // because BundleProgram is only supported under SMAppService.
     private func legacyPath() -> Bool {
         do {
@@ -203,20 +201,7 @@ final class SmokeGate {
         guard step("bootstrap legacy job", bootCode == 0,
                    detail: "exit \(bootCode): \(firstLine(of: bootOutput))")
         else { return false }
-        // The legacy dump always echoes the absolute ProgramArguments path,
-        // so only a live pid running that executable proves launchd ran the
-        // job rather than merely loaded it.
-        let (code, output, spawned) = pollLaunchctlPrint(label: watcherLabel) {
-            launchctlPidResolvesExecutable($0, executablePath: executablePath,
-                                           pathForPid: executablePath(ofPid:))
-        }
-        guard step("launchctl print shows the legacy job", code == 0,
-                   detail: "exit \(code): \(firstLine(of: output))")
-        else { return false }
-        guard step("legacy job spawned the in-bundle executable", spawned,
-                   detail: "expected a pid running \(executablePath); launchd has "
-                       + programLines(of: output))
-        else { return false }
+        guard spawnSteps(job: "legacy job") else { return false }
         let (outCode, outOutput) = runLaunchctl(
             ["bootout", "gui/\(getuid())/\(watcherLabel)"])
         legacyBootstrapped = outCode != 0
@@ -294,13 +279,29 @@ final class SmokeGate {
             .first.map(String.init) ?? ""
     }
 
-    // What launchd actually resolved, for the resolution-failure detail: the
-    // program/arguments-adjacent lines of the print dump, so a path-form
-    // mismatch is diagnosable from the FAIL line alone.
-    private func programLines(of output: String) -> String {
+    // The two steps both mechanisms share: launchd shows the job, and a pid
+    // under it runs the in-bundle executable (launchctlPidResolvesExecutable
+    // says why only a pid counts).
+    private func spawnSteps(job: String) -> Bool {
+        let (code, output, spawned) = pollWatcherSpawn(
+            label: watcherLabel, bundleExecutable: executablePath)
+        guard step("launchctl print shows the \(job)", code == 0,
+                   detail: "exit \(code): \(firstLine(of: output))")
+        else { return false }
+        return step("\(job) spawned the in-bundle executable", spawned,
+                    detail: "expected a pid running \(executablePath); launchd has "
+                        + jobLines(of: output))
+    }
+
+    // What launchd actually did with the job, for the spawn-failure detail:
+    // the program/arguments lines (a path-form mismatch) plus the pid, state
+    // and exit lines (never spawned, or a pid still in xpcproxy), so the
+    // FAIL line alone says which.
+    private func jobLines(of output: String) -> String {
+        let keys = ["program", "cataclysm", "pid", "state", "runs", "last exit"]
         let lines = output.split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { $0.contains("program") || $0.contains("cataclysm") }
-        return lines.isEmpty ? "no program lines" : lines.joined(separator: " | ")
+            .filter { line in keys.contains { line.contains($0) } }
+        return lines.isEmpty ? "no job lines" : lines.joined(separator: " | ")
     }
 }

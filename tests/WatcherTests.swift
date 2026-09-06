@@ -116,8 +116,9 @@ struct WatcherTests {
                 WatcherRegistrationPlan(unregisterFirst: false, register: true),
                 "same version but nothing loaded: register")
         // The legacy job is the active mechanism on a machine SMAppService
-        // refuses; agent.status never reads enabled there, and re-registering
-        // every launch would boot the working job out first.
+        // refuses; agent.status reads not registered there (no smd record),
+        // and re-registering every launch would boot the working job out
+        // first.
         checkEq(watcherRegistrationPlan(statusEnabled: false, legacyCurrent: true,
                                         versionChanged: false),
                 WatcherRegistrationPlan(unregisterFirst: false, register: false),
@@ -126,6 +127,13 @@ struct WatcherTests {
                                         versionChanged: true),
                 WatcherRegistrationPlan(unregisterFirst: false, register: true),
                 "version change on a legacy job: register (SMAppService retried)")
+        // The legacy job holds the shared label, so status reads enabled
+        // too; the plan still asks for the unregister, and the runtime is
+        // what treats its failure as expected in that state.
+        checkEq(watcherRegistrationPlan(statusEnabled: true, legacyCurrent: true,
+                                        versionChanged: true),
+                WatcherRegistrationPlan(unregisterFirst: true, register: true),
+                "version change with the legacy job holding the label: unregister then register")
     }
 
     // The runtime and the smoke gate both consume these; a drift here would

@@ -117,21 +117,27 @@ func runLaunchctl(_ arguments: [String]) -> (code: Int32, output: String) {
     return (proc.terminationStatus, String(data: data, encoding: .utf8) ?? "")
 }
 
+// The spawn poll: 30 x 0.5s = 15s.
+let launchctlPollTicks = 30
+
 // Polls `launchctl print` for the job until `resolved` accepts a dump or the
-// 10s window (20 x 0.5s) runs out. KeepAlive's SuccessfulExit key implies
+// 15s window runs out. KeepAlive's SuccessfulExit key implies
 // RunAtLoad (launchd.plist(5)), so a job launchd accepted spawns on
-// registration; the poll covers the spawn latency. Shared by the smoke gate
-// and the runtime's post-registration spawn check so both measure the same
-// thing. Blocks for the whole window when the job never spawns.
+// registration; the poll covers the spawn latency. The window has to outlast
+// launchd's 10s respawn throttle: a label that failed to spawn before (the
+// hollow registration an update replaces) gets its first attempt only after
+// that delay, and a 10s window closed just before it. Shared by the smoke
+// gate and the runtime's post-registration spawn check so both measure the
+// same thing. Blocks for the whole window when the job never spawns.
 func pollLaunchctlPrint(label: String,
                         resolved: (String) -> Bool) -> (code: Int32, output: String,
                                                         resolved: Bool) {
     var code: Int32 = -1
     var output = ""
-    for attempt in 0..<20 {
+    for attempt in 0..<launchctlPollTicks {
         (code, output) = runLaunchctl(["print", "gui/\(getuid())/\(label)"])
         if code == 0, resolved(output) { return (code, output, true) }
-        if attempt < 19 { usleep(500_000) }
+        if attempt < launchctlPollTicks - 1 { usleep(500_000) }
     }
     return (code, output, false)
 }

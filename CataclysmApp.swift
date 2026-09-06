@@ -156,8 +156,8 @@ final class AppRuntime {
     private var onboarding: OnboardingController?
     private var signalSources: [DispatchSourceSignal] = []
     // Stamps the background spawn check a registration starts; bumped by
-    // every registration and reset so a stale result cannot act on a job
-    // that has since been replaced or torn down.
+    // every registration so a stale result cannot act on a job that has
+    // since been replaced.
     private var watcherProbeGeneration = 0
 
     private init() {
@@ -249,7 +249,7 @@ final class AppRuntime {
         // the timer nor the immediate tick below exists in those processes.
         // Each tick re-reads the switch, so turning it off cancels nothing in
         // flight and simply leaves the next tick ineligible.
-        telemetry = Telemetry(settings: loaded, appVersion: appVersion
+        telemetry = Telemetry(settings: loaded, appVersion: appVersion)
         telemetryTimer = Timer.scheduledTimer(withTimeInterval: Telemetry.tickInterval,
                                               repeats: true) {
             [weak self] _ in self?.telemetryTick()
@@ -483,14 +483,19 @@ final class AppRuntime {
         watcherProbeGeneration += 1
         let agent = SMAppService.agent(plistName: watcherPlistName)
         let version = appVersion
+        // The legacy job counts as the active mechanism only when launchd has
+        // it loaded and its stored path is this bundle's: a moved bundle or a
+        // plist whose bootstrap failed falls through to registration instead.
+        let storedLegacyPath = legacyWatcherStoredPath
+        let legacyCurrent = storedLegacyPath == watcherExecutablePath && legacyWatcherLoaded()
         let plan = watcherRegistrationPlan(
             statusEnabled: agent.status == .enabled,
-            legacyCurrent: legacyWatcherCurrent(),
+            legacyCurrent: legacyCurrent,
             versionChanged: settings.lastRegisteredVersion != version)
         if plan.unregisterFirst {
             do {
                 try agent.unregister()
-            } catch {
+            } catch where !legacyCurrent {
                 // The stale agent is still enabled. Registering over it, or
                 // installing the legacy job beside it, and then recording
                 // this version would make every later launch read "same
@@ -500,6 +505,13 @@ final class AppRuntime {
                     + error.localizedDescription
                 refreshWatcherStatus()
                 return
+            } catch {
+                // status reads .enabled only because the legacy job holds the
+                // shared label, and launchd refuses to remove a job smd did
+                // not submit ("Requestor lacks required entitlement"). That
+                // job is booted out by the register path below anyway, so
+                // the failure is not an obstacle: falling through updates in
+                // one launch instead of surfacing a red row until the next.
             }
         }
         if plan.register {
@@ -548,12 +560,14 @@ final class AppRuntime {
                 }
             }
         }
-        reconcileLegacyWatcherIfMoved()
+        // A register pass rewrote or deleted the plist itself; only a pass
+        // that left it alone can find it stale.
+        if !plan.register { reconcileLegacyWatcherIfMoved(storedPath: storedLegacyPath) }
         refreshWatcherStatus()
         // Probed whenever the agent is what launchd should be running, not
         // only on the launch that registered it. A hollow registration
         // (accepted, .enabled, never spawned) is the normal outcome under the
-        // self-signed identity, and its 10s check only completes if this
+        // self-signed identity, and its 15s check only completes if this
         // process survives that long: quit, logout, or a crash inside the
         // window would otherwise leave every later launch reading "same
         // version, enabled" and never installing the fallback. A re-run
@@ -572,28 +586,33 @@ final class AppRuntime {
     // recovery, so the runtime makes the smoke gate's check too, off the
     // main thread because the hollow case blocks for the full window. On
     // non-spawn the agent is unregistered and the legacy job installed in
-    // its place; a failed unregister is surfaced instead, since the legacy
-    // job cannot take the label while the agent still holds it. The
-    // generation stamp drops a result that lands after a later registration
-    // or a reset changed what is loaded.
+    // its place. A failed unregister is surfaced only while launchd still
+    // holds the job: the legacy job cannot take the label then. With nothing
+    // loaded the label is free, and stopping there would repeat identically
+    // every launch (same version, status still enabled) with no watcher at
+    // all. The generation stamp drops a result that lands after a later
+    // registration replaced the job.
     private func verifyWatcherSpawn(generation: Int) {
         let label = legacyWatcherLabel
         let executable = watcherExecutablePath
         DispatchQueue.global().async {
-            let probe = pollLaunchctlPrint(label: label) {
-                smokeResolution(output: $0, executablePath: executable,
-                                pathForPid: executablePath(ofPid:))
-            }
+            let probe = pollWatcherSpawn(label: label, bundleExecutable: executable)
             DispatchQueue.main.async { [self] in
                 guard generation == watcherProbeGeneration, !probe.resolved else { return }
                 do {
                     try SMAppService.agent(plistName: watcherPlistName).unregister()
-                } catch {
+                } catch where runLaunchctl(["print", "gui/\(getuid())/\(label)"]).code == 0 {
+                    // Asked now rather than read off the poll's last tick,
+                    // which is up to 15s old and reads -1 on a failed spawn
+                    // of launchctl itself.
                     state.watcherError = "Crash recovery failed: the registered "
                         + "watcher never started and could not be unregistered: "
                         + error.localizedDescription
                     refreshWatcherStatus()
                     return
+                } catch {
+                    // Nothing loaded under the label: the legacy bootstrap
+                    // below can claim it whatever smd's record says.
                 }
                 if let failure = installLegacyWatcher() {
                     state.watcherError = "Crash recovery failed: the registered "
@@ -606,14 +625,10 @@ final class AppRuntime {
         }
     }
 
-    // The legacy job counts as the active mechanism only when launchd has it
-    // loaded and its stored path is this bundle's: a moved bundle or a plist
-    // whose bootstrap failed falls through to registration instead.
-    private func legacyWatcherCurrent() -> Bool {
-        guard let data = try? Data(contentsOf: legacyWatcherPlistURL),
-              legacyWatcherExecutablePath(inPlistData: data) == watcherExecutablePath
-        else { return false }
-        return legacyWatcherLoaded()
+    // The absolute executable path the legacy plist stores; nil without one.
+    private var legacyWatcherStoredPath: String? {
+        guard let data = try? Data(contentsOf: legacyWatcherPlistURL) else { return nil }
+        return legacyWatcherExecutablePath(inPlistData: data)
     }
 
     // Writes the legacy plist with the current absolute executable path and
@@ -642,10 +657,8 @@ final class AppRuntime {
     // The legacy plist's absolute path goes stale when the app moves (the
     // ~/Downloads case BundleProgram exists to solve, which the legacy path
     // cannot use); rewrite and re-bootstrap when it no longer matches.
-    private func reconcileLegacyWatcherIfMoved() {
-        guard let data = try? Data(contentsOf: legacyWatcherPlistURL),
-              let stored = legacyWatcherExecutablePath(inPlistData: data),
-              stored != watcherExecutablePath else { return }
+    private func reconcileLegacyWatcherIfMoved(storedPath: String?) {
+        guard let stored = storedPath, stored != watcherExecutablePath else { return }
         if let failure = installLegacyWatcher() {
             state.watcherError = "Crash recovery failed after the app moved: \(failure)"
         }
