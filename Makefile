@@ -157,16 +157,11 @@ build/telemetry-tests: Telemetry.swift Settings.swift ScrollFilter.swift Hotkey.
 
 DMG = build/Cataclysm-$(VERSION).dmg
 STABLE_DMG = build/Cataclysm.dmg
-ZIP = build/Cataclysm-$(VERSION).zip
 
-# Release assets:
-# the versioned drag-to-install image, a byte-identical copy under a
-# version-stable name so the website's /download fallback can address it
-# without an API call, and the updater zip (ditto -c -k --keepParent keeps the
-# signature, nested code and symlinks intact). The fourth asset, appcast.xml,
-# comes from a separate `make appcast` because it needs the EdDSA key from the
-# login keychain. No .zip.sha256: the appcast carries the zip's length and
-# signature.
+# Release assets: the versioned drag-to-install image and a byte-identical
+# copy under a version-stable name so the website's /download fallback can
+# address it without an API call. There is no updater; the app shows its
+# version in the panel header and players fetch a new image themselves.
 #
 # The image itself is deliberately NOT signed. Only the app inside is. A DMG
 # signed with the self-signed identity is refused at mount time with no
@@ -176,14 +171,13 @@ ZIP = build/Cataclysm-$(VERSION).zip
 # read-me next to the app icon replaces a Finder background image, which a
 # read-only image cannot store.
 dmg: app packaging/dmg-readme.txt
-	rm -rf build/dmg-stage $(DMG) $(STABLE_DMG) $(ZIP)
+	rm -rf build/dmg-stage $(DMG) $(STABLE_DMG)
 	mkdir -p build/dmg-stage
 	cp -R $(APP) build/dmg-stage/
 	ln -s /Applications build/dmg-stage/Applications
 	cp packaging/dmg-readme.txt "build/dmg-stage/Read me first.txt"
 	hdiutil create -volname Cataclysm -srcfolder build/dmg-stage -ov -format UDZO $(DMG)
 	cp $(DMG) $(STABLE_DMG)
-	ditto -c -k --keepParent $(APP) $(ZIP)
 
 clean:
 	rm -rf build

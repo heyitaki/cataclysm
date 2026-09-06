@@ -35,7 +35,7 @@ Uncheck "Launch at login" and quit from the dropdown, then move Cataclysm to Tra
 
 ## Building from source
 
-Needs the Xcode command line tools and a code-signing identity named `Cataclysm` in the keychain (self-signed is fine; override with `IDENTITY=`). `make` builds `build/Cataclysm.app`, `make test` runs the tests. `make dmg VERSION=x.y.z` produces, in `build/`, `Cataclysm-x.y.z.dmg` (unsigned image, signed app inside), `Cataclysm.dmg` (byte-identical, version-stable name) and `Cataclysm-x.y.z.zip` (the updater's archive); `appcast.xml`, the updater's feed, is built separately. Running the bundled binary with `--dump-scroll` logs each raw scroll event and the filter's decision to stdout.
+Needs the Xcode command line tools and a code-signing identity named `Cataclysm` in the keychain (self-signed is fine; override with `IDENTITY=`). `make` builds `build/Cataclysm.app`, `make test` runs the tests. `make dmg VERSION=x.y.z` produces, in `build/`, `Cataclysm-x.y.z.dmg` (unsigned image, signed app inside) and `Cataclysm.dmg` (byte-identical, version-stable name). Running the bundled binary with `--dump-scroll` logs each raw scroll event and the filter's decision to stdout.
 
 The download redirect and heartbeat receiver live in [`worker/`](worker/) and need Node and npm. `cd worker && npm install && npm test` runs its tests (the report script's tests also need `bash`, `curl` and `jq`); `npm run check` is a dry-run deploy and `npm run deploy` publishes through the machine's `wrangler login` session.
 
