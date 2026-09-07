@@ -1322,7 +1322,6 @@ struct PanelView: View {
             gameRow
             menuDivider
             accelToggle
-            pointerSpeedRow
             // A downed tap holds nothing a click could undo, so these
             // tap-backed toggles pass held: false and disable while failed;
             // only the acceleration toggle keeps a live retry (accelHeld).
@@ -1331,6 +1330,9 @@ struct PanelView: View {
                           failed: scrollFailed,
                           held: false,
                           set: { AppRuntime.shared.setInvertVertical($0) })
+            // The two checkboxes, then the two sliders, so the section reads
+            // as switches followed by dials rather than alternating.
+            pointerSpeedRow
             SpeedSliderRow(title: "Scroll speed", scale: scrollSpeedScale,
                            thousandths: model.mulThousandths,
                            isDisabled: !state.trusted || scrollFailed || !model.enabled,
