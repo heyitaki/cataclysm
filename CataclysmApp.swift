@@ -1139,6 +1139,12 @@ struct OnboardingView: View {
 
 // MARK: - Panel
 
+// Every slider row reserves the same label and readout widths, so the two
+// tracks start and end on the same x whatever their own title and range.
+private let speedSliderLabelReserve = "Pointer speed"
+private let speedSliderReadoutReserve = multiplierLabel(forThousandths: mulThousandths(
+    forMultiplier: max(scrollSpeedScale.maximum, pointerSpeedScale.maximum)))
+
 struct SpeedSliderRow: View {
     let title: String
     let scale: SliderScale
@@ -1163,7 +1169,11 @@ struct SpeedSliderRow: View {
             ? mulThousandths(forMultiplier: scale.multiplier(forPosition: sliderPos))
             : thousandths
         HStack(spacing: 6) {
-            Text(title).fixedSize()
+            ZStack(alignment: .leading) {
+                Text(speedSliderLabelReserve).hidden()
+                Text(title)
+            }
+            .fixedSize()
 
             // The unavailable caption occupies the inactive track, keeping
             // the readout and reset in place within the 320-point panel.
@@ -1182,11 +1192,10 @@ struct SpeedSliderRow: View {
                 }
             }
 
-            // Reserve the widest in-range readout so the track stays still
-            // when the multiplier reaches two digits.
+            // Reserve the widest in-range readout of either scale so the
+            // track stays still when the multiplier reaches two digits.
             ZStack(alignment: .trailing) {
-                Text(multiplierLabel(forThousandths: mulThousandths(forMultiplier: scale.maximum)))
-                    .hidden()
+                Text(speedSliderReadoutReserve).hidden()
                 Text(multiplierLabel(forThousandths: readout))
             }
             .monospacedDigit()
