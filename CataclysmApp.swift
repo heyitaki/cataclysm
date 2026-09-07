@@ -1174,6 +1174,8 @@ struct SpeedSliderRow: View {
                 Text(title)
             }
             .fixedSize()
+            // A little air between the label and the track's start.
+            .padding(.trailing, 6)
 
             // The unavailable caption occupies the inactive track, keeping
             // the readout and reset in place within the 320-point panel.
