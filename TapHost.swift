@@ -23,6 +23,13 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }
         return Unmanaged.passUnretained(event)
     }
+    // The release that ends a deferred title-bar drag. After this callback
+    // returns, so the AX reads do not hold this event past the tap timeout;
+    // the event is the proof of the release, so refresh does not re-read the
+    // button state.
+    if type == .leftMouseUp, engageDeferred {
+        DispatchQueue.main.async { refresh(leftReleased: true) }
+    }
     guard engaged, let area = clampArea else { return Unmanaged.passUnretained(event) }
     // Every tapped type must consume pendingWarp: clicks carry delta fields
     // too, and a warp displacement can fold into whichever event comes next.
@@ -193,11 +200,11 @@ func stopScrollTap() {
     scrollTap = nil
 }
 
-// Same self-heal refresh() gives the jail tap: macOS disables taps under load
-// or on wake, and the disabled-type callback only runs if events still reach
-// it. No-op while the scroll tap was never started.
-func reviveScrollTap() {
-    if let t = scrollTap, !CGEvent.tapIsEnabled(tap: t) {
+// Self-heal, run by refresh() whenever it engages or defers: macOS disables
+// taps under load or on wake, and the disabled-type callback only runs if
+// events still reach it. No-op while the tap was never started.
+func revive(_ port: CFMachPort?) {
+    if let t = port, !CGEvent.tapIsEnabled(tap: t) {
         CGEvent.tapEnable(tap: t, enable: true)
     }
 }

@@ -38,6 +38,11 @@ var jailEnabled = true
 // so integration sees only hand movement, otherwise our own warps feed back
 // and the cursor rockets away.
 var pendingWarp = CGPoint.zero
+// refresh() held off engaging because the left button is down from a press
+// outside the clamp (a title-bar drag). Latched until the release: the tap's
+// mouse-up hook refreshes so the cursor snaps into the game on release
+// instead of at the next timer tick.
+var engageDeferred = false
 
 // One attribute read with the failure kinds the callers need apart: missing
 // (the window has no such attribute, or answers it with the wrong type) is a
@@ -180,6 +185,10 @@ func windowListWindow(_ app: NSRunningApplication) -> FallbackWindow {
     return fallbackWindow(entries: entries, displays: displays.prefix(Int(count)).map(CGDisplayBounds))
 }
 
+func cursorLocation() -> CGPoint {
+    CGEvent(source: nil)?.location ?? .zero
+}
+
 func setEngaged(_ on: Bool) {
     if on == engaged { return }
     engaged = on
@@ -187,7 +196,7 @@ func setEngaged(_ on: Bool) {
         // Disassociate first so this warp folds into the next delta the same
         // way every later warp does and pendingWarp stays honest.
         CGAssociateMouseAndMouseCursorPosition(0)
-        let loc = CGEvent(source: nil)?.location ?? .zero
+        let loc = cursorLocation()
         let target = clampArea.map { $0.clamped(loc) } ?? loc
         virtualPos = target
         pendingWarp = CGPoint(x: target.x - loc.x, y: target.y - loc.y)
@@ -203,10 +212,14 @@ func setEngaged(_ on: Bool) {
 func releaseJail() {
     clampArea = nil
     clampSource = nil
+    engageDeferred = false
     setEngaged(false)
 }
 
-func refresh() {
+// leftReleased: the caller saw the left button go up, so the session button
+// state, which the window server updates after the tap has passed the event
+// on, is not consulted for this refresh.
+func refresh(leftReleased: Bool = false) {
     // tap != nil: engaging disassociates the hardware mouse from the cursor,
     // and only the tap callback moves it afterwards. With no tap (tapCreate
     // failed despite trust) that would freeze the cursor outright.
@@ -237,6 +250,18 @@ func refresh() {
         return releaseJail()
     }
     guard let area = clampArea else { return }
+    if !engaged {
+        // The session state also ends a latched deferral whose release the
+        // tap missed (disabled by timeout across the mouse-up).
+        let held = !leftReleased
+            && CGEventSource.buttonState(.combinedSessionState, button: .left)
+        let loc = held ? cursorLocation() : .zero
+        engageDeferred = shouldDeferEngage(deferred: engageDeferred, leftButtonHeld: held,
+                                           cursor: loc, area: area)
+        // Skip the disassociate below: while not engaged it would freeze the
+        // cursor mid-drag. The tap still needs reviving, for the mouse-up hook.
+        if engageDeferred { return revive(tap) }
+    }
     setEngaged(true)
     // Re-clamp after a window move or resize so the cursor and clicks cannot
     // sit outside the new rect until the next move event.
@@ -251,7 +276,5 @@ func refresh() {
     // Self-heal: something may have re-associated the cursor (display change,
     // wake from sleep, another process) or disabled the tap. Both idempotent.
     CGAssociateMouseAndMouseCursorPosition(0)
-    if let t = tap, !CGEvent.tapIsEnabled(tap: t) {
-        CGEvent.tapEnable(tap: t, enable: true)
-    }
+    revive(tap)
 }

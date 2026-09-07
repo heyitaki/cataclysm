@@ -384,7 +384,7 @@ final class AppRuntime {
             [weak self] _ in
             self?.retryDownTaps()
             refresh()
-            reviveScrollTap()
+            revive(scrollTap)
         }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,

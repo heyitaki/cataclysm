@@ -140,6 +140,21 @@ func jailClamp(mode: WindowMode, frame: CGRect, closeButton: CGRect?,
     return Clamp(rect: inner, titleBar: titleBar, cornerRadius: windowed ? cornerRadius : 0)
 }
 
+// A press on the title bar (or a resize edge) of an unfocused game window
+// activates the game, and the activation refresh would engage mid-press: the
+// cursor warps into the content area and the drag dies with it. A held press
+// that started outside the clamp defers engagement until the release. Once
+// deferred, only the release ends it: the cursor position mid-press says
+// nothing about the press (a lagging window or a stale clamp leaves the
+// cursor over the content area mid-drag). A held press inside the clamp is
+// the ordinary click that focuses the game and engages at once. Only the
+// not-yet-engaged case: an engaged jail never lets a press land outside the
+// clamp.
+func shouldDeferEngage(deferred: Bool, leftButtonHeld: Bool, cursor: CGPoint,
+                       area: Clamp) -> Bool {
+    leftButtonHeld && (deferred || area.clamped(cursor) != cursor)
+}
+
 // The title bar must be excluded from the clamp or click-flicks drag the
 // window and ratchet the cursor out the top. Preferred measurement is the
 // close button, which sits vertically centered in the title bar; no close

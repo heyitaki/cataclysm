@@ -1,8 +1,8 @@
 // Harness for the pure jail geometry (JailMath.swift): the rounded-rect
 // clamp's corner projection, radius capping, title-bar shrink, the
-// title-bar inference rules, the display-mode classification, and the
-// window-server fallback's window selection. Pure functions; no AX, no
-// windows.
+// title-bar inference rules, the display-mode classification, the
+// engagement deferral for a held title-bar press, and the window-server
+// fallback's window selection. Pure functions; no AX, no windows.
 //
 // Build and run: make test
 
@@ -33,6 +33,7 @@ struct JailMathTests {
         titleBarTests()
         windowModeTests()
         jailClampTests()
+        shouldDeferEngageTests()
         fallbackWindowTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
@@ -177,6 +178,33 @@ struct JailMathTests {
         check(jailClamp(mode: .borderless, frame: CGRect(x: 0, y: 0, width: 1, height: 100),
                         closeButton: nil, cornerRadius: 18) == nil,
               "a frame too thin to inset yields no clamp")
+    }
+
+    static func shouldDeferEngageTests() {
+        let area = Clamp(rect: CGRect(x: 0, y: 30, width: 200, height: 200),
+                         titleBar: 30, cornerRadius: 0)
+        let onTitleBar = CGPoint(x: 100, y: 15)
+        let content = CGPoint(x: 100, y: 100)
+        func shouldDefer(deferred: Bool, held: Bool, at cursor: CGPoint,
+                         in clamp: Clamp = area) -> Bool {
+            shouldDeferEngage(deferred: deferred, leftButtonHeld: held, cursor: cursor, area: clamp)
+        }
+        check(shouldDefer(deferred: false, held: true, at: onTitleBar), "a held press outside the clamp defers")
+        check(!shouldDefer(deferred: false, held: false, at: onTitleBar),
+              "a released button outside the clamp engages")
+        check(!shouldDefer(deferred: false, held: true, at: content), "a held press inside the clamp engages")
+        check(!shouldDefer(deferred: false, held: false, at: content), "released inside the clamp engages")
+        // Mid-drag the cursor can sit over the content area (lagging window,
+        // stale clamp); only the release ends a deferral.
+        check(shouldDefer(deferred: true, held: true, at: content), "a deferred press stays deferred inside the clamp")
+        check(!shouldDefer(deferred: true, held: false, at: onTitleBar), "the release ends the deferral")
+        // The corner gap is inside the rect but outside the window, so a
+        // press there is a press on the app behind: the rule follows the
+        // rounded clamp, not the rect.
+        let rounded = Clamp(rect: CGRect(x: 0, y: 0, width: 100, height: 100),
+                            titleBar: 0, cornerRadius: 10)
+        check(shouldDefer(deferred: false, held: true, at: CGPoint(x: 98, y: 98), in: rounded),
+              "a held press in the corner gap defers")
     }
 
     // The window-server fallback (fallbackWindow): the jail's measurement
