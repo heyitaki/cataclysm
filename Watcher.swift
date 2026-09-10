@@ -154,15 +154,14 @@ func launchctlPidResolvesExecutable(_ output: String, executablePath: String,
     return pathForPid(pid) == executablePath
 }
 
-// The runtime's post-registration probe: polls `launchctl print` for up to
-// 15s (30 x 0.5s) until a live pid under the label runs this bundle's
-// executable. KeepAlive's SuccessfulExit key implies RunAtLoad
-// (launchd.plist(5)), so a job launchd accepted spawns on registration; the
-// poll covers the spawn latency. The window has to outlast launchd's 10s
-// respawn throttle: a label that failed to spawn before (the hollow
-// registration an update replaces) gets its first attempt only after that
-// delay, and a 10s window closed just before it. Blocks for the whole window
-// when the job never spawns.
+// The runtime's post-registration probe: polls `launchctl print` until a live
+// pid under the label runs this bundle's executable. KeepAlive's
+// SuccessfulExit key implies RunAtLoad (launchd.plist(5)), so a job launchd
+// accepted spawns on registration, and the poll covers the spawn latency. The
+// window has to outlast launchd's 10s respawn throttle: a label that failed
+// to spawn before (the hollow registration an update replaces) gets its first
+// attempt only after that delay, so a shorter window closes just before it.
+// Blocks for the whole window when the job never spawns.
 func pollWatcherSpawn() -> (code: Int32, output: String, resolved: Bool) {
     let executable = watcherExecutablePath
     var code: Int32 = -1

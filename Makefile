@@ -94,10 +94,11 @@ build/Cataclysm.icns: packaging/icon.png
 # typecheck first: the unit harnesses link only the pure modules, so without
 # it a rename in app-only code leaves `make test` green while `make app`
 # breaks for the next builder.
-# Each harness links its own module plus tests/<Module>Tests.swift; the lines
-# below add the extra modules three of them need. Settings pulls in
+# Each harness links its own module plus tests/<Module>Tests.swift. The lines
+# below add the extra modules two of them need: Settings pulls in
 # ScrollFilter.swift for the clamp helpers and Hotkey.swift for the
-# stored-chord validation; Telemetry reads its bookkeeping through Settings.
+# stored-chord validation, and Telemetry reads its bookkeeping through
+# Settings.
 TEST_BINARIES = build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/jailmath-tests build/telemetry-tests
 
 build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
