@@ -859,7 +859,12 @@ final class AppRuntime {
             // No pointerAccel == nil gate: an instance kept by a failed
             // disable() has no timer, and startAcceleration() is what
             // rebuilds it (enable() is idempotent for a live one).
-            if settings.accelerationOff { startAcceleration() }
+            if settings.accelerationOff {
+                startAcceleration()
+                // Same as setEnabled: re-taking the property supersedes a
+                // failed release the panel latched as failed.
+                refreshAccelHealth()
+            }
             refresh()
         }
     }
@@ -1503,8 +1508,10 @@ struct PanelView: View {
     private var pointerSpeedRow: some View {
         SpeedSliderRow(title: "Pointer speed", scale: pointerSpeedScale,
                        thousandths: settings.pointerSpeedThousandths,
+                       // Failed too: the tick is writing raw -1, so the
+                       // multiplier the slider sets is not in effect.
                        isDisabled: !(settings.enabled && settings.accelerationOff && state.accelHeld
-                                     && state.pointerSpeedAvailable),
+                                     && state.pointerSpeedAvailable && !accelFailed),
                        caption: pointerSpeedCaption,
                        set: { AppRuntime.shared.setPointerSpeedThousandths($0) })
     }

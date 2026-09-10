@@ -21,3 +21,16 @@ typedef CF_ENUM(int, IOHIDEventSystemClientType) {
 CF_RETURNS_RETAINED IOHIDEventSystemClientRef _Nullable IOHIDEventSystemClientCreateWithType(
     CFAllocatorRef _Nullable allocator, IOHIDEventSystemClientType type,
     CFDictionaryRef _Nullable attributes);
+// Scheduling is what Apple's IOHIDEventSystemMonitor does before it
+// enumerates services, so the client can follow mice as they attach and
+// detach. Unscheduled, the list is the snapshot taken at creation: a
+// detached mouse stayed in it as a dead service whose writes answered
+// false (observed). Whether scheduling alone keeps the list current is
+// inferred, not measured; PointerAccel's fresh-client retry is what
+// guarantees the write. Exported by IOKit alongside CreateWithType.
+void IOHIDEventSystemClientScheduleWithRunLoop(
+    IOHIDEventSystemClientRef _Nonnull client, CFRunLoopRef _Nonnull runLoop,
+    CFStringRef _Nonnull runLoopMode);
+void IOHIDEventSystemClientUnscheduleWithRunLoop(
+    IOHIDEventSystemClientRef _Nonnull client, CFRunLoopRef _Nonnull runLoop,
+    CFStringRef _Nonnull runLoopMode);

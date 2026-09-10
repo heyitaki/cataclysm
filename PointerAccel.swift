@@ -13,7 +13,9 @@
 // paths must reach it on the main thread: signal handlers via a main-queue
 // dispatch source (as CataclysmApp.swift already does), and atexit only from
 // a main-thread exit(), or a reassert tick still in flight can re-take the
-// property after restore() has released it.
+// property after restore() has released it. The flag client stays
+// scheduled at exit; the run loop dies with the process, so nothing is
+// left behind.
 
 import Cocoa
 
@@ -32,6 +34,7 @@ final class PointerAccel {
     // stored value may be the only copy of the user's real acceleration.
     private static let storeKey = "recovery.originalMouseAcceleration"
     private static let reassertInterval: TimeInterval = 5
+    private static let rebuildInterval: Duration = .seconds(60)
     // Consecutive ticks with the property unreadable-because-absent before
     // the condition is surfaced as unhealthy: long enough to ride out the
     // normal post-wake blip, short enough that a dead HID connection does
@@ -59,7 +62,24 @@ final class PointerAccel {
     private let client: IOHIDEventSystemClient
     // The flag's client. Nil when the SPI refuses, which reads as no linear
     // support, so the class falls back to raw mode rather than failing.
-    private let flagClient: IOHIDEventSystemClient?
+    // Scheduled on the main run loop so its service list follows mice as
+    // they attach and detach; unscheduled, the list is a snapshot from
+    // creation, and a detached mouse lingers in it as a service whose
+    // reads answer nil and whose writes answer false, which reads as a
+    // broken flag write on every tick and blocks the restore on release.
+    private var flagClient: IOHIDEventSystemClient?
+    // When a rebuild was last attempted. A write that keeps failing through
+    // a fresh list is a real refusal, and rebuilding the HID connection on
+    // every tick for the life of the process buys nothing, so rebuilds are
+    // spaced by rebuildInterval; but never withheld outright, or a device
+    // that refused and then detached would block the write until relaunch.
+    // Only a write that lands without a rebuild clears the spacing (a
+    // success that needed one is the spacing doing its job), and so does
+    // restore(), so a release always gets its own fresh look. Continuous
+    // clock: wall-clock steps must not extend the spacing, and a sleep
+    // must not freeze it, since wake is when a connection is most likely
+    // stale.
+    private var flagClientRebuiltAt: ContinuousClock.Instant?
     private var mode = Mode.raw
     private var speed: Int32
     private var timer: Timer?
@@ -94,8 +114,7 @@ final class PointerAccel {
         dispatchPrecondition(condition: .onQueue(.main))
         speed = Self.fixedSpeed(thousandths: speedThousandths)
         client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
-        flagClient = IOHIDEventSystemClientCreateWithType(
-            kCFAllocatorDefault, .passive, nil)
+        flagClient = Self.makeFlagClient()
         let defaults = UserDefaults.standard
         // Recovery copies with no restore since mean a predecessor was
         // killed holding: claim what it held, so even a raw-mode instance
@@ -205,6 +224,7 @@ final class PointerAccel {
     // not be taken down. The stored originals survive for a later restore.
     @discardableResult
     func restore() -> Bool {
+        flagClientRebuiltAt = nil
         guard holding || flagHeld else { return true }
         let mice = mouseServices()
         if holding {
@@ -262,6 +282,24 @@ final class PointerAccel {
         // No main-queue assertion here: trapping inside deallocation would
         // be worse than the leak it guards against.
         teardown()
+        // After teardown: its restore may have replaced the client.
+        if let flagClient { Self.unscheduleFlagClient(flagClient) }
+    }
+
+    private static func makeFlagClient() -> IOHIDEventSystemClient? {
+        guard let client = IOHIDEventSystemClientCreateWithType(
+            kCFAllocatorDefault, .passive, nil) else { return nil }
+        // Common modes, like the reassert timer, so attach and detach
+        // notifications land while a menu or window has the run loop in
+        // event tracking.
+        IOHIDEventSystemClientScheduleWithRunLoop(
+            client, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        return client
+    }
+
+    private static func unscheduleFlagClient(_ client: IOHIDEventSystemClient) {
+        IOHIDEventSystemClientUnscheduleWithRunLoop(
+            client, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
     }
 
     // A non-(-1) reading is a deliberate change (System Settings tracking
@@ -494,8 +532,36 @@ final class PointerAccel {
     // cover any that missed it, and the per-service reads are the read-back
     // the tick and the health check see. Reports whether every write landed
     // and whether any did.
+    //
+    // A refusal gets one retry through a fresh client and its own service
+    // list: a service that detached between the list copy and the write,
+    // or a connection the HID server dropped, would otherwise answer false
+    // forever, forcing raw mode on every tick and pinning the flag claim
+    // on release. A creation failure keeps the old client, since nil would
+    // strip every flag read and write, not just this one.
     private func writeLinearScaling(_ value: Int32,
                                     mice: [MouseService]) -> (all: Bool, any: Bool) {
+        let first = writeLinearScalingOnce(value, mice: mice)
+        if first.all {
+            flagClientRebuiltAt = nil
+            return first
+        }
+        let now = ContinuousClock.now
+        guard flagClientRebuiltAt.map({ now - $0 >= Self.rebuildInterval }) ?? true else {
+            return first
+        }
+        flagClientRebuiltAt = now
+        guard let replacement = Self.makeFlagClient() else { return first }
+        if let old = flagClient { Self.unscheduleFlagClient(old) }
+        flagClient = replacement
+        // With the last mouse gone the fresh list is empty and the system
+        // write is the whole job, so an empty list is not distrusted.
+        let retry = writeLinearScalingOnce(value, mice: mouseServices())
+        return (retry.all, first.any || retry.any)
+    }
+
+    private func writeLinearScalingOnce(_ value: Int32,
+                                        mice: [MouseService]) -> (all: Bool, any: Bool) {
         var value = value
         guard let flagClient,
               let number = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &value) else {
