@@ -8,7 +8,7 @@ APP = build/Cataclysm.app
 .DELETE_ON_ERROR:
 
 # Explicit source list; a *.swift glob would silently pick up any stray file.
-APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Smoke.swift SmokeGate.swift Jail.swift JailMath.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift MenuBarIcon.swift Telemetry.swift
+APP_SOURCES = CataclysmApp.swift Startup.swift Watcher.swift Jail.swift JailMath.swift TapHost.swift PointerAccel.swift ScrollFilter.swift Settings.swift PanelMath.swift GamePicker.swift Hotkey.swift HotkeyCenter.swift MenuBarIcon.swift Telemetry.swift
 
 # Extra codesign flags (e.g. --timestamp); local builds stay offline-friendly
 # without any.
@@ -78,36 +78,41 @@ install: app
 	rm -rf /Applications/Cataclysm.app
 	ditto $(APP) /Applications/Cataclysm.app
 
-build/icon-gen: packaging/IconGen.swift
-	mkdir -p build
-	xcrun swiftc -O packaging/IconGen.swift -o $@
-
-build/icon-1024.png: build/icon-gen
-	./build/icon-gen $@
-
 # Full ten-slice iconset via iconutil; `sips -s format icns` is the fallback
 # because iconutil reports "Invalid Iconset" when sandboxing denies its mach
 # lookups. A sips success alongside an iconutil failure is environment, not a
 # broken iconset.
-build/Cataclysm.icns: build/icon-1024.png
+build/Cataclysm.icns: packaging/icon.png
 	rm -rf build/Cataclysm.iconset
 	mkdir -p build/Cataclysm.iconset
-	sips -z 16 16 build/icon-1024.png --out build/Cataclysm.iconset/icon_16x16.png >/dev/null
-	sips -z 32 32 build/icon-1024.png --out build/Cataclysm.iconset/icon_16x16@2x.png >/dev/null
-	sips -z 32 32 build/icon-1024.png --out build/Cataclysm.iconset/icon_32x32.png >/dev/null
-	sips -z 64 64 build/icon-1024.png --out build/Cataclysm.iconset/icon_32x32@2x.png >/dev/null
-	sips -z 128 128 build/icon-1024.png --out build/Cataclysm.iconset/icon_128x128.png >/dev/null
-	sips -z 256 256 build/icon-1024.png --out build/Cataclysm.iconset/icon_128x128@2x.png >/dev/null
-	sips -z 256 256 build/icon-1024.png --out build/Cataclysm.iconset/icon_256x256.png >/dev/null
-	sips -z 512 512 build/icon-1024.png --out build/Cataclysm.iconset/icon_256x256@2x.png >/dev/null
-	sips -z 512 512 build/icon-1024.png --out build/Cataclysm.iconset/icon_512x512.png >/dev/null
-	cp build/icon-1024.png build/Cataclysm.iconset/icon_512x512@2x.png
-	iconutil -c icns build/Cataclysm.iconset -o $@ || sips -s format icns build/icon-1024.png --out $@ >/dev/null
+	for s in 16 32 128 256 512; do \
+		sips -z $$s $$s $< --out build/Cataclysm.iconset/icon_$${s}x$${s}.png >/dev/null || exit 1; \
+		sips -z $$((s * 2)) $$((s * 2)) $< --out build/Cataclysm.iconset/icon_$${s}x$${s}@2x.png >/dev/null || exit 1; \
+	done
+	iconutil -c icns build/Cataclysm.iconset -o $@ || sips -s format icns $< --out $@ >/dev/null
 
 # typecheck first: the unit harnesses link only the pure modules, so without
 # it a rename in app-only code leaves `make test` green while `make app`
 # breaks for the next builder.
-TEST_BINARIES = build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/smoke-tests build/jailmath-tests build/telemetry-tests
+# Each harness links its own module plus tests/<Module>Tests.swift; the lines
+# below add the extra modules three of them need. Settings pulls in
+# ScrollFilter.swift for the clamp helpers and Hotkey.swift for the
+# stored-chord validation; Telemetry reads its bookkeeping through Settings.
+TEST_BINARIES = build/scrollfilter-tests build/settings-tests build/startup-tests build/panelmath-tests build/gamepicker-tests build/hotkey-tests build/watcher-tests build/jailmath-tests build/telemetry-tests
+
+build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
+build/settings-tests: Settings.swift ScrollFilter.swift Hotkey.swift tests/SettingsTests.swift
+build/startup-tests: Startup.swift tests/StartupTests.swift
+build/panelmath-tests: PanelMath.swift tests/PanelMathTests.swift
+build/gamepicker-tests: GamePicker.swift tests/GamePickerTests.swift
+build/hotkey-tests: Hotkey.swift tests/HotkeyTests.swift
+build/watcher-tests: Watcher.swift tests/WatcherTests.swift
+build/jailmath-tests: JailMath.swift tests/JailMathTests.swift
+build/telemetry-tests: Telemetry.swift Settings.swift ScrollFilter.swift Hotkey.swift tests/TelemetryTests.swift
+
+build/%-tests:
+	mkdir -p build
+	xcrun swiftc -O $^ -o $@
 
 test: typecheck $(TEST_BINARIES)
 	@for t in $(TEST_BINARIES); do echo "./$$t"; ./$$t || exit 1; done
@@ -117,50 +122,6 @@ test: typecheck $(TEST_BINARIES)
 # not first at `make app`.
 typecheck: $(APP_SOURCES) Bridging.h
 	xcrun swiftc -typecheck -target arm64-apple-macos13.0 -import-objc-header Bridging.h $(APP_SOURCES)
-
-build/scrollfilter-tests: ScrollFilter.swift tests/ScrollFilterTests.swift
-	mkdir -p build
-	xcrun swiftc -O ScrollFilter.swift tests/ScrollFilterTests.swift -o $@
-
-# ScrollFilter.swift supplies the clamp helpers and Hotkey.swift the stored-
-# chord validation Settings reuses.
-build/settings-tests: Settings.swift ScrollFilter.swift Hotkey.swift tests/SettingsTests.swift
-	mkdir -p build
-	xcrun swiftc -O Settings.swift ScrollFilter.swift Hotkey.swift tests/SettingsTests.swift -o $@
-
-build/startup-tests: Startup.swift tests/StartupTests.swift
-	mkdir -p build
-	xcrun swiftc -O Startup.swift tests/StartupTests.swift -o $@
-
-build/panelmath-tests: PanelMath.swift tests/PanelMathTests.swift
-	mkdir -p build
-	xcrun swiftc -O PanelMath.swift tests/PanelMathTests.swift -o $@
-
-build/gamepicker-tests: GamePicker.swift tests/GamePickerTests.swift
-	mkdir -p build
-	xcrun swiftc -O GamePicker.swift tests/GamePickerTests.swift -o $@
-
-build/hotkey-tests: Hotkey.swift tests/HotkeyTests.swift
-	mkdir -p build
-	xcrun swiftc -O Hotkey.swift tests/HotkeyTests.swift -o $@
-
-build/watcher-tests: Watcher.swift tests/WatcherTests.swift
-	mkdir -p build
-	xcrun swiftc -O Watcher.swift tests/WatcherTests.swift -o $@
-
-build/smoke-tests: Smoke.swift tests/SmokeTests.swift
-	mkdir -p build
-	xcrun swiftc -O Smoke.swift tests/SmokeTests.swift -o $@
-
-build/jailmath-tests: JailMath.swift tests/JailMathTests.swift
-	mkdir -p build
-	xcrun swiftc -O JailMath.swift tests/JailMathTests.swift -o $@
-
-# Telemetry reads its opt-out default and bookkeeping through Settings, so the harness
-# links the store and the two modules it depends on.
-build/telemetry-tests: Telemetry.swift Settings.swift ScrollFilter.swift Hotkey.swift tests/TelemetryTests.swift
-	mkdir -p build
-	xcrun swiftc -O Telemetry.swift Settings.swift ScrollFilter.swift Hotkey.swift tests/TelemetryTests.swift -o $@
 
 DMG = build/Cataclysm-$(VERSION).dmg
 STABLE_DMG = build/Cataclysm.dmg

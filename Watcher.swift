@@ -1,9 +1,24 @@
 // Watcher and registration primitives: the release decision for the --watch
-// poll loop, the registration plan, and the legacy ~/Library/LaunchAgents
-// plist the app writes when SMAppService refuses the self-signed identity. Foundation-only so the test harness can
-// exercise all of it without launchd, AppKit, or any system state.
+// poll loop, the registration plan, the spawn check, and the legacy
+// ~/Library/LaunchAgents plist the app writes when SMAppService refuses the
+// self-signed identity. Foundation-only so the test harness can exercise the
+// pure parts without launchd, AppKit, or any system state.
 
 import Foundation
+
+let cataclysmBundleID = "io.github.heyitaki.cataclysm"
+let watcherLabel = "\(cataclysmBundleID).watch"
+// The launchctl domain target of the job, for print/bootout/bootstrap.
+var watcherJobTarget: String { "gui/\(getuid())/\(watcherLabel)" }
+let watcherPlistName = "\(watcherLabel).plist"
+let legacyWatcherPlistURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/LaunchAgents/\(watcherPlistName)")
+// The absolute path the legacy plist carries (BundleProgram is only supported
+// under SMAppService). Derived from bundleURL on every read so a moved bundle
+// is noticed, never cached.
+var watcherExecutablePath: String {
+    Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/cataclysm").path
+}
 
 // One decision per poll tick. `previous` nil is the watcher's own startup: if
 // the app is already absent, release once before entering the loop: a
@@ -82,27 +97,7 @@ func watcherRegistrationPlan(statusEnabled: Bool, legacyCurrent: Bool,
                             register: !(statusEnabled || legacyCurrent) || versionChanged)
 }
 
-// MARK: - Shared job derivations
-
-// Used by both the app runtime and the smoke gate, so the gate always
-// validates exactly the label, plist path, and executable path the runtime
-// will register. Parameterized (no Bundle or FileManager reads) so the test
-// harness can pin the derivations.
-func watcherJobLabel(bundleID: String) -> String {
-    "\(bundleID).watch"
-}
-
-func legacyWatcherPlistLocation(home: URL, bundleID: String) -> URL {
-    home.appendingPathComponent(
-        "Library/LaunchAgents/\(watcherJobLabel(bundleID: bundleID)).plist")
-}
-
-func watcherExecutable(inBundle bundleURL: URL) -> String {
-    bundleURL.appendingPathComponent("Contents/MacOS/cataclysm").path
-}
-
-// The one launchctl runner. Callers that only branch on the exit code drop
-// the output; the smoke gate reports it in FAIL details.
+// The one launchctl runner. Most callers only branch on the exit code.
 @discardableResult
 func runLaunchctl(_ arguments: [String]) -> (code: Int32, output: String) {
     let proc = Process()
@@ -117,29 +112,9 @@ func runLaunchctl(_ arguments: [String]) -> (code: Int32, output: String) {
     return (proc.terminationStatus, String(data: data, encoding: .utf8) ?? "")
 }
 
-// The spawn poll: 30 x 0.5s = 15s.
-let launchctlPollTicks = 30
-
-// Polls `launchctl print` for the job until `resolved` accepts a dump or the
-// 15s window runs out. KeepAlive's SuccessfulExit key implies
-// RunAtLoad (launchd.plist(5)), so a job launchd accepted spawns on
-// registration; the poll covers the spawn latency. The window has to outlast
-// launchd's 10s respawn throttle: a label that failed to spawn before (the
-// hollow registration an update replaces) gets its first attempt only after
-// that delay, and a 10s window closed just before it. Shared by the smoke
-// gate and the runtime's post-registration spawn check so both measure the
-// same thing. Blocks for the whole window when the job never spawns.
-func pollLaunchctlPrint(label: String,
-                        resolved: (String) -> Bool) -> (code: Int32, output: String,
-                                                        resolved: Bool) {
-    var code: Int32 = -1
-    var output = ""
-    for attempt in 0..<launchctlPollTicks {
-        (code, output) = runLaunchctl(["print", "gui/\(getuid())/\(label)"])
-        if code == 0, resolved(output) { return (code, output, true) }
-        if attempt < launchctlPollTicks - 1 { usleep(500_000) }
-    }
-    return (code, output, false)
+// Whether launchd holds the job right now, by either mechanism.
+func watcherJobLoaded() -> Bool {
+    runLaunchctl(["print", watcherJobTarget]).code == 0
 }
 
 // The true executable of a running process, from the kernel rather than argv
@@ -150,6 +125,57 @@ func executablePath(ofPid pid: Int32) -> String? {
     var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
     guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
     return String(cString: buffer)
+}
+
+// The job's running pid from a launchctl print dump (a "pid = 12345" line);
+// nil when the job has no live process. Only the leading digits are read, so
+// a dump format that annotates the pid still parses.
+func launchctlPid(inOutput output: String) -> Int32? {
+    for rawLine in output.split(separator: "\n") {
+        let line = rawLine.trimmingCharacters(in: .whitespaces)
+        guard line.hasPrefix("pid = ") else { continue }
+        return Int32(line.dropFirst("pid = ".count).prefix(while: \.isNumber))
+    }
+    return nil
+}
+
+// A live pid whose true executable (pathForPid, proc_pidpath in production)
+// matches the in-bundle path: proof that launchd ran the program, not only
+// that it loaded the definition. The absolute path appearing in the dump
+// proves nothing: a BundleProgram job launchd cannot spawn (no Team ID, so
+// its LWCR update fails) still shows the path resolved, which once let a
+// hollow registration pass as a running watcher. An empty expected path can
+// never count as resolved. A pid launchd is still initializing runs
+// xpcproxy, so it does not match either.
+func launchctlPidResolvesExecutable(_ output: String, executablePath: String,
+                                    pathForPid: (Int32) -> String?) -> Bool {
+    guard !executablePath.isEmpty,
+          let pid = launchctlPid(inOutput: output) else { return false }
+    return pathForPid(pid) == executablePath
+}
+
+// The runtime's post-registration probe: polls `launchctl print` for up to
+// 15s (30 x 0.5s) until a live pid under the label runs this bundle's
+// executable. KeepAlive's SuccessfulExit key implies RunAtLoad
+// (launchd.plist(5)), so a job launchd accepted spawns on registration; the
+// poll covers the spawn latency. The window has to outlast launchd's 10s
+// respawn throttle: a label that failed to spawn before (the hollow
+// registration an update replaces) gets its first attempt only after that
+// delay, and a 10s window closed just before it. Blocks for the whole window
+// when the job never spawns.
+func pollWatcherSpawn() -> (code: Int32, output: String, resolved: Bool) {
+    let executable = watcherExecutablePath
+    var code: Int32 = -1
+    var output = ""
+    for attempt in 0..<30 {
+        (code, output) = runLaunchctl(["print", watcherJobTarget])
+        if code == 0, launchctlPidResolvesExecutable(output, executablePath: executable,
+                                                     pathForPid: executablePath(ofPid:)) {
+            return (code, output, true)
+        }
+        if attempt < 29 { usleep(500_000) }
+    }
+    return (code, output, false)
 }
 
 // The legacy job's plist. Two deliberate differences from the bundled

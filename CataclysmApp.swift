@@ -1,6 +1,6 @@
 // Cataclysm app entry. `main()` dispatches on arguments before SwiftUI ever
-// loads, so the watcher (`--watch`) and the acceptance gate (`--smoke-register`)
-// never start UI, never touch AppKit state, and can run headless under launchd.
+// loads, so the watcher (`--watch`) never starts UI, never touches AppKit
+// state, and can run headless under launchd.
 // A plain launch runs six startup steps in order: instance lock,
 // cursor re-association, install-location gate, clamped settings load, trust
 // check, and only then taps, the acceleration property, and agent
@@ -10,9 +10,6 @@
 import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
-
-let cataclysmBundleID = "io.github.heyitaki.cataclysm"
-let watcherPlistName = "\(cataclysmBundleID).watch.plist"
 
 // MARK: - Runtime globals shared with Jail/TapHost
 
@@ -33,9 +30,6 @@ struct CataclysmMain {
         let args = CommandLine.arguments.dropFirst()
         if args.contains(watcherFlag) {
             runWatcher()
-        }
-        if args.contains("--smoke-register") {
-            exit(SmokeGate().run())
         }
         // The scroll measurement flag only sets the dump global, then the
         // launch proceeds normally.
@@ -116,29 +110,9 @@ final class AppState: ObservableObject {
     // RegisterEventHotKey refused the chord (another app owns it). Shows in
     // the hotkey row rather than leaving a recorded chord that does nothing.
     @Published var hotkeyRegistrationFailed = false
-}
-
-// Mirror of the stored settings the panel binds to. AppRuntime is the only
-// writer: its setters persist through Settings, update the live feature, and
-// keep this mirror in sync, so a control can never show a value that did not
-// reach storage.
-final class SettingsModel: ObservableObject {
-    @Published var enabled = true
-    @Published var jailEnabled = true
-    @Published var accelOff = true
-    @Published var invertVertical = true
-    @Published var launchAtLogin = true
-    @Published var mulThousandths = 1_000
-    @Published var pointerSpeedThousandths = 1_000
-    @Published var targetBundleID = ""
+    // The game picker's rows, rebuilt on panel open and on every app launch
+    // or quit system-wide.
     @Published var pickerRows: [GamePickerRow] = []
-    @Published var invertHorizontal = true
-    @Published var flattenNotches = true
-    @Published var linesPerNotch = 1
-    @Published var altTrackpadDetection = false
-    @Published var cornerRadiusSetting = Settings.Default.cornerRadius
-    @Published var hotkeyKeyCode = Settings.Default.hotkeyKeyCode
-    @Published var hotkeyModifiers = Settings.Default.hotkeyModifiers
 }
 
 // MARK: - Startup sequence and feature lifecycle
@@ -146,10 +120,11 @@ final class SettingsModel: ObservableObject {
 final class AppRuntime {
     static let shared = AppRuntime()
     let state = AppState()
-    let panel = SettingsModel()
+    // The store the panel binds to directly: its setters publish, so a
+    // control can never show a value that did not reach storage.
+    let settings = Settings()
 
     private let lock: InstanceLock
-    private var settings: Settings?
     private var pointerAccel: PointerAccel?
     private let hotkeyCenter = HotkeyCenter()
     private var refreshTimer: Timer?
@@ -202,8 +177,6 @@ final class AppRuntime {
     // Steps 4-6. The trust poll runs for the whole process lifetime: it
     // dismisses onboarding on a fresh grant and catches a revoked one.
     func start() {
-        let loaded = Settings()
-        settings = loaded
         // setEngaged only runs from the tap callback and the refresh timer,
         // both on the main run loop, so the publish needs no dispatch.
         onEngagedChange = { [weak self] on in self?.state.jailEngaged = on }
@@ -215,8 +188,8 @@ final class AppRuntime {
             // Inert while the master switch is off, like the dimmed
             // checkbox: a stray chord must not silently rewrite the stored
             // preference behind a closed panel.
-            guard self.settings?.enabled != false else { return }
-            self.setJailEnabled(!(self.settings?.jailEnabled ?? true))
+            guard self.settings.enabled else { return }
+            self.setJailEnabled(!self.settings.jailEnabled)
         }
         applyHotkey()
         installExitRestorers()
@@ -229,7 +202,7 @@ final class AppRuntime {
         // stall. Deferring puts both on the first run loop pass instead.
         if state.trusted {
             DispatchQueue.main.async {
-                if loaded.enabled { self.startFeatures() }
+                if self.settings.enabled { self.startFeatures() }
                 self.registerAgentsIfNeeded()
             }
         } else {
@@ -255,13 +228,13 @@ final class AppRuntime {
         // path of a release image: the Makefile writes CataclysmHeartbeat
         // into Info.plist, true for `make dmg` and false for local builds,
         // which then never mint an install id. The ordering in main() is
-        // load-bearing: `--watch` and `--smoke-register` exit before start()
-        // is ever called, so neither the timer nor the immediate tick below
-        // exists in those processes. Each tick re-reads the opt-out switch,
-        // so turning it off cancels nothing in flight and simply leaves the
-        // next tick ineligible.
+        // load-bearing: `--watch` exits before start() is ever called, so
+        // neither the timer nor the immediate tick below exists in the
+        // watcher process. Each tick re-reads the opt-out switch, so turning
+        // it off cancels nothing in flight and simply leaves the next tick
+        // ineligible.
         if Bundle.main.infoDictionary?["CataclysmHeartbeat"] as? Bool == true {
-            telemetry = Telemetry(settings: loaded, appVersion: appVersion)
+            telemetry = Telemetry(settings: settings, appVersion: appVersion)
             telemetryTimer = Timer.scheduledTimer(withTimeInterval: Telemetry.tickInterval,
                                                   repeats: true) {
                 [weak self] _ in self?.telemetryTick()
@@ -292,45 +265,20 @@ final class AppRuntime {
     }
 
     private func applySettings() {
-        guard let settings else { return }
         gameBundle = settings.targetBundleID
         cornerRadius = CGFloat(settings.cornerRadius)
         jailEnabled = settings.jailEnabled
         applyScrollConfigs()
-        reloadPanel()
-    }
-
-    // Refresh the panel's mirror from storage; called at startup and every
-    // panel open, so a value changed behind the panel (a later hotkey, a
-    // reset) is never shown stale.
-    func reloadPanel() {
-        guard let settings else { return }
-        panel.enabled = settings.enabled
-        panel.jailEnabled = settings.jailEnabled
-        panel.accelOff = settings.accelerationOff
-        panel.invertVertical = settings.invertVertical
-        panel.launchAtLogin = settings.launchAtLogin
-        panel.mulThousandths = settings.mulThousandths
-        panel.pointerSpeedThousandths = settings.pointerSpeedThousandths
-        panel.targetBundleID = settings.targetBundleID
-        panel.invertHorizontal = settings.invertHorizontal
-        panel.flattenNotches = settings.flattenNotches
-        panel.linesPerNotch = settings.linesPerNotch
-        panel.altTrackpadDetection = settings.altTrackpadDetection
-        panel.cornerRadiusSetting = settings.cornerRadius
-        panel.hotkeyKeyCode = settings.hotkeyKeyCode
-        panel.hotkeyModifiers = settings.hotkeyModifiers
         rebuildGamePicker()
     }
 
     // Snapshot the running .regular apps into pure picker rows. Called on
-    // panel open (via reloadPanel) and on every workspace launch/terminate
-    // notification. The stored target is kept whatever its activation
-    // policy: its row claims "(not running)" when absent, and a target
-    // running as an accessory app is still running. Known apps take their
-    // picker name from the table so Riot's look-alike apps stay apart.
+    // panel open and on every workspace launch/terminate notification. The
+    // stored target is kept whatever its activation policy: its row claims
+    // "(not running)" when absent, and a target running as an accessory app
+    // is still running. Known apps take their picker name from the table so
+    // Riot's look-alike apps stay apart.
     func rebuildGamePicker() {
-        guard let settings else { return }
         let target = settings.targetBundleID
         let stored: String? = target == Settings.noTarget ? nil : target
         let keep = Set(pinnedApps.compactMap(\.bundleID) + [target])
@@ -352,7 +300,7 @@ final class AppRuntime {
         // Rebuilds fire on every app launch and quit system-wide; an
         // unchanged snapshot must not republish, or the whole panel
         // re-renders (and re-resolves icons) for unrelated apps.
-        if rows != panel.pickerRows { panel.pickerRows = rows }
+        if rows != state.pickerRows { state.pickerRows = rows }
     }
 
     private func trustTick() {
@@ -362,7 +310,7 @@ final class AppRuntime {
         if trusted {
             onboarding?.close()
             onboarding = nil
-            if settings?.enabled ?? true { startFeatures() }
+            if settings.enabled { startFeatures() }
             registerAgentsIfNeeded()
         } else {
             // Revoked while running: the taps stop delivering and that is not
@@ -375,9 +323,7 @@ final class AppRuntime {
 
     private func startFeatures() {
         guard !state.featuresRunning else { return }
-        if let settings, settings.accelerationOff {
-            startAcceleration()
-        }
+        if settings.accelerationOff { startAcceleration() }
         state.jailTapUp = startTap()
         state.scrollTapUp = startScrollTap()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
@@ -426,14 +372,12 @@ final class AppRuntime {
         // is re-enabled rather than replaced, so its claim and stored
         // original carry over. enable() is idempotent for a live instance.
         if let pointerAccel {
-            pointerAccel.setSpeed(thousandths: settings?.pointerSpeedThousandths
-                                  ?? Settings.Default.pointerSpeedThousandths)
+            pointerAccel.setSpeed(thousandths: settings.pointerSpeedThousandths)
             pointerAccel.enable()
             state.accelHeld = true
             return
         }
-        let accel = PointerAccel(speedThousandths: settings?.pointerSpeedThousandths
-                                 ?? Settings.Default.pointerSpeedThousandths)
+        let accel = PointerAccel(speedThousandths: settings.pointerSpeedThousandths)
         state.pointerSpeedAvailable = accel.linearAvailable
         accel.onLinearAvailabilityChange = { [weak self] available in
             self?.state.pointerSpeedAvailable = available
@@ -450,6 +394,18 @@ final class AppRuntime {
         state.accelUnresponsive = !accel.clientResponsive
         pointerAccel = accel
         state.accelHeld = true
+    }
+
+    // Everything a panel open refreshes. The store's publish forces a fresh
+    // read of every setting: a value changed behind the panel (a `defaults
+    // write`) never went through a publishing setter. Deferred a turn so it
+    // never publishes inside the update that showed the panel.
+    func panelWillAppear() {
+        DispatchQueue.main.async { self.settings.objectWillChange.send() }
+        rebuildGamePicker()
+        refreshWatcherStatus()
+        refreshLoginItemStatus()
+        refreshAccelHealth()
     }
 
     // Re-probe on panel open: a HID client that recovers without ever passing
@@ -473,25 +429,6 @@ final class AppRuntime {
 
     // MARK: - Watcher registration
 
-    // Label, plist path, and executable path all come from the shared
-    // derivations in Watcher.swift, the same ones the smoke gate validates.
-
-    private var legacyWatcherLabel: String {
-        watcherJobLabel(bundleID: cataclysmBundleID)
-    }
-
-    private var legacyWatcherPlistURL: URL {
-        legacyWatcherPlistLocation(
-            home: FileManager.default.homeDirectoryForCurrentUser,
-            bundleID: cataclysmBundleID)
-    }
-
-    // The absolute path the legacy plist carries; derived from bundleURL every
-    // read so a moved bundle is noticed, never cached.
-    private var watcherExecutablePath: String {
-        watcherExecutable(inBundle: Bundle.main.bundleURL)
-    }
-
     let appVersion =
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
 
@@ -500,7 +437,6 @@ final class AppRuntime {
     // executable changed unless it is re-registered, and every release
     // changes the executable.
     private func registerWatcher() {
-        guard let settings else { return }
         watcherProbeGeneration += 1
         let agent = SMAppService.agent(plistName: watcherPlistName)
         let version = appVersion
@@ -604,25 +540,22 @@ final class AppRuntime {
     // but launchd fails every spawn ("Unable to get updated LWCR", because
     // BTM ignores the plist's bundle identifiers for an executable with no
     // Team ID) and throttles the respawns. A hollow registration is no crash
-    // recovery, so the runtime makes the smoke gate's check too, off the
-    // main thread because the hollow case blocks for the full window. On
-    // non-spawn the agent is unregistered and the legacy job installed in
-    // its place. A failed unregister is surfaced only while launchd still
+    // recovery, so the runtime checks for a real spawn, off the main thread
+    // because the hollow case blocks for the full window. On non-spawn the
+    // agent is unregistered and the legacy job installed in its place. A failed unregister is surfaced only while launchd still
     // holds the job: the legacy job cannot take the label then. With nothing
     // loaded the label is free, and stopping there would repeat identically
     // every launch (same version, status still enabled) with no watcher at
     // all. The generation stamp drops a result that lands after a later
     // registration replaced the job.
     private func verifyWatcherSpawn(generation: Int) {
-        let label = legacyWatcherLabel
-        let executable = watcherExecutablePath
         DispatchQueue.global().async {
-            let probe = pollWatcherSpawn(label: label, bundleExecutable: executable)
+            let probe = pollWatcherSpawn()
             DispatchQueue.main.async { [self] in
                 guard generation == watcherProbeGeneration, !probe.resolved else { return }
                 do {
                     try SMAppService.agent(plistName: watcherPlistName).unregister()
-                } catch where runLaunchctl(["print", "gui/\(getuid())/\(label)"]).code == 0 {
+                } catch where watcherJobLoaded() {
                     // Asked now rather than read off the poll's last tick,
                     // which is up to 15s old and reads -1 on a failed spawn
                     // of launchctl itself.
@@ -659,12 +592,12 @@ final class AppRuntime {
     private func installLegacyWatcher() -> String? {
         do {
             let data = try legacyWatcherPlistData(
-                label: legacyWatcherLabel, bundleID: cataclysmBundleID,
+                label: watcherLabel, bundleID: cataclysmBundleID,
                 executablePath: watcherExecutablePath)
             try FileManager.default.createDirectory(
                 at: legacyWatcherPlistURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true)
-            runLaunchctl(["bootout", "gui/\(getuid())/\(legacyWatcherLabel)"])
+            runLaunchctl(["bootout", watcherJobTarget])
             try data.write(to: legacyWatcherPlistURL)
             guard runLaunchctl(
                 ["bootstrap", "gui/\(getuid())", legacyWatcherPlistURL.path]).code == 0
@@ -694,7 +627,6 @@ final class AppRuntime {
     // preference off unregisters in that state too, else the entry would
     // outlive the setting and launch the app again once re-enabled there
     private func syncLoginItem() {
-        guard let settings else { return }
         let status = SMAppService.mainApp.status
         state.loginItemRequiresApproval =
             settings.launchAtLogin && status == .requiresApproval
@@ -725,14 +657,13 @@ final class AppRuntime {
     // System Settings otherwise stays invisible until the checkbox is next
     // toggled. Registers and unregisters nothing.
     func refreshLoginItemStatus() {
-        guard let settings else { return }
         state.loginItemRequiresApproval =
             settings.launchAtLogin && SMAppService.mainApp.status == .requiresApproval
     }
 
     private func legacyWatcherLoaded() -> Bool {
         FileManager.default.fileExists(atPath: legacyWatcherPlistURL.path)
-            && runLaunchctl(["print", "gui/\(getuid())/\(legacyWatcherLabel)"]).code == 0
+            && watcherJobLoaded()
     }
 
     // MARK: - Panel write-through
@@ -747,8 +678,7 @@ final class AppRuntime {
     // quit; on restarts everything under the same trust gate as startup.
     // The stored feature preferences are untouched either way.
     func setEnabled(_ on: Bool) {
-        settings?.enabled = on
-        panel.enabled = on
+        settings.enabled = on
         if on {
             if state.trusted { startFeatures() }
             // A failed release latched accelWriteFailing; re-taking the
@@ -761,8 +691,7 @@ final class AppRuntime {
     }
 
     func setJailEnabled(_ on: Bool) {
-        settings?.jailEnabled = on
-        panel.jailEnabled = on
+        settings.jailEnabled = on
         jailEnabled = on
         if state.featuresRunning { refresh() }
     }
@@ -770,9 +699,8 @@ final class AppRuntime {
     // Persist the bundle id and the display name together: the synthesized
     // row needs both when the target is absent.
     func setTarget(bundleID: String, name: String) {
-        settings?.targetBundleID = bundleID
-        settings?.targetDisplayName = name
-        panel.targetBundleID = bundleID
+        settings.targetBundleID = bundleID
+        settings.targetDisplayName = name
         gameBundle = bundleID
         rebuildGamePicker()
         if state.featuresRunning { refresh() }
@@ -805,8 +733,7 @@ final class AppRuntime {
     }
 
     func setAccelerationOff(_ on: Bool) {
-        settings?.accelerationOff = on
-        panel.accelOff = on
+        settings.accelerationOff = on
         if on {
             // The enable half waits for trust: startup step 6 owns when the
             // property is first taken.
@@ -841,60 +768,49 @@ final class AppRuntime {
     }
 
     func setInvertVertical(_ on: Bool) {
-        settings?.invertVertical = on
-        panel.invertVertical = on
+        settings.invertVertical = on
         applyScrollConfigs()
     }
 
     func setMulThousandths(_ thousandths: Int) {
-        settings?.mulThousandths = thousandths
-        // Read back so the mirror carries what storage actually clamped to.
-        panel.mulThousandths = settings?.mulThousandths ?? thousandths
+        settings.mulThousandths = thousandths
         applyScrollConfigs()
     }
 
     func setPointerSpeedThousandths(_ thousandths: Int) {
-        settings?.pointerSpeedThousandths = thousandths
-        panel.pointerSpeedThousandths = settings?.pointerSpeedThousandths
-            ?? clampedPointerSpeedThousandths(thousandths)
-        pointerAccel?.setSpeed(thousandths: panel.pointerSpeedThousandths)
+        settings.pointerSpeedThousandths = thousandths
+        // Read back: the store clamps.
+        pointerAccel?.setSpeed(thousandths: settings.pointerSpeedThousandths)
     }
 
     func setLaunchAtLogin(_ on: Bool) {
-        settings?.launchAtLogin = on
-        panel.launchAtLogin = on
+        settings.launchAtLogin = on
         syncLoginItem()
     }
 
     func setInvertHorizontal(_ on: Bool) {
-        settings?.invertHorizontal = on
-        panel.invertHorizontal = on
+        settings.invertHorizontal = on
         applyScrollConfigs()
     }
 
     func setFlattenNotches(_ on: Bool) {
-        settings?.flattenNotches = on
-        panel.flattenNotches = on
+        settings.flattenNotches = on
         applyScrollConfigs()
     }
 
     func setLinesPerNotch(_ lines: Int) {
-        settings?.linesPerNotch = lines
-        // Read back so the mirror carries what storage actually clamped to.
-        panel.linesPerNotch = settings?.linesPerNotch ?? lines
+        settings.linesPerNotch = lines
         applyScrollConfigs()
     }
 
     func setAltTrackpadDetection(_ on: Bool) {
-        settings?.altTrackpadDetection = on
-        panel.altTrackpadDetection = on
+        settings.altTrackpadDetection = on
         applyScrollConfigs()
     }
 
     func setCornerRadius(_ radius: Double) {
-        settings?.cornerRadius = radius
-        panel.cornerRadiusSetting = settings?.cornerRadius ?? radius
-        cornerRadius = CGFloat(panel.cornerRadiusSetting)
+        settings.cornerRadius = radius
+        cornerRadius = CGFloat(settings.cornerRadius)
         // The clamp rebuilds from the global on the next refresh; force one so
         // the new arc applies now rather than on the 0.5s tick.
         if state.featuresRunning { refresh() }
@@ -905,21 +821,18 @@ final class AppRuntime {
     // Persist first, then register: a chord another app owns still stores and
     // displays, with the failure shown in the row.
     func setHotkey(keyCode: Int, modifiers: Int) {
-        settings?.hotkeyKeyCode = keyCode
-        settings?.hotkeyModifiers = modifiers
-        panel.hotkeyKeyCode = keyCode
-        panel.hotkeyModifiers = modifiers
+        settings.hotkeyKeyCode = keyCode
+        settings.hotkeyModifiers = modifiers
         applyHotkey()
     }
 
     // The recorder releases the registration while capturing: an active
     // RegisterEventHotKey swallows its own chord globally, so re-recording
-    // the current chord would otherwise never reach either mechanism.
+    // the current chord would otherwise never reach the recorder's monitor.
     func beginHotkeyCapture() { hotkeyCenter.unregister() }
     func endHotkeyCapture() { applyHotkey() }
 
     private func applyHotkey() {
-        guard let settings else { return }
         state.hotkeyRegistrationFailed = !hotkeyCenter.apply(
             keyCode: settings.hotkeyKeyCode, modifiers: settings.hotkeyModifiers)
     }
@@ -931,7 +844,6 @@ final class AppRuntime {
     // defaults immediately. Acceleration stays off at the default speed:
     // a running feature keeps holding and a stopped one starts.
     func resetToDefaults() {
-        guard let settings else { return }
         settings.resetToDefaults()
         applySettings()
         pointerAccel?.setSpeed(thousandths: settings.pointerSpeedThousandths)
@@ -961,9 +873,8 @@ final class AppRuntime {
     private func bootOutLegacyWatcher() -> String? {
         guard FileManager.default.fileExists(atPath: legacyWatcherPlistURL.path)
         else { return nil }
-        let target = "gui/\(getuid())/\(legacyWatcherLabel)"
-        runLaunchctl(["bootout", target])
-        guard runLaunchctl(["print", target]).code != 0 else {
+        runLaunchctl(["bootout", watcherJobTarget])
+        guard !watcherJobLoaded() else {
             return "the legacy crash-recovery job is still loaded in launchd"
         }
         try? FileManager.default.removeItem(at: legacyWatcherPlistURL)
@@ -973,7 +884,6 @@ final class AppRuntime {
     }
 
     private func applyScrollConfigs() {
-        guard let settings else { return }
         scrollVerticalConfig = settings.verticalScrollConfig
         scrollHorizontalConfig = settings.horizontalScrollConfig
         scrollAltDetection = settings.altTrackpadDetection
@@ -1023,13 +933,10 @@ final class AppRuntime {
     }
 
     private func showDuplicateNotice() {
-        let other = NSRunningApplication
-            .runningApplications(withBundleIdentifier: cataclysmBundleID)
-            .first { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         _ = NSApplication.shared
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "\(other?.localizedName ?? "Cataclysm") is already running"
+        alert.messageText = "Cataclysm is already running"
         alert.informativeText =
             "This copy will quit. The running instance keeps control of the "
             + "cursor and pointer settings."
@@ -1232,7 +1139,7 @@ struct SpeedSliderRow: View {
 }
 
 struct CataclysmApp: App {
-    @ObservedObject private var panel = AppRuntime.shared.panel
+    @ObservedObject private var settings = AppRuntime.shared.settings
     @ObservedObject private var state = AppRuntime.shared.state
     // Drawn once per state; the label re-evaluates on every panel or state
     // change and follows the master switch, then the cursor lock.
@@ -1244,9 +1151,9 @@ struct CataclysmApp: App {
         // `.window` style because the speed sliders do not
         // render in `.menu`.
         MenuBarExtra {
-            PanelView(state: AppRuntime.shared.state, model: AppRuntime.shared.panel)
+            PanelView(state: state, settings: settings)
         } label: {
-            Image(nsImage: !panel.enabled ? Self.offIcon
+            Image(nsImage: !settings.enabled ? Self.offIcon
                   : state.jailEngaged ? Self.engagedIcon : Self.onIcon)
         }
         .menuBarExtraStyle(.window)
@@ -1260,7 +1167,7 @@ struct CataclysmApp: App {
 // the panel never reflows as values change.
 struct PanelView: View {
     @ObservedObject var state: AppState
-    @ObservedObject var model: SettingsModel
+    @ObservedObject var settings: Settings
     // Which page shows; every open starts on the main page.
     @State private var showingAdvanced = false
 
@@ -1282,10 +1189,7 @@ struct PanelView: View {
         .background(PanelWindowStyle())
         .onAppear {
             showingAdvanced = false
-            AppRuntime.shared.reloadPanel()
-            AppRuntime.shared.refreshWatcherStatus()
-            AppRuntime.shared.refreshLoginItemStatus()
-            AppRuntime.shared.refreshAccelHealth()
+            AppRuntime.shared.panelWillAppear()
         }
     }
 
@@ -1307,7 +1211,7 @@ struct PanelView: View {
                 }
                 Spacer()
                 Toggle("Cataclysm on", isOn: Binding(
-                    get: { model.enabled },
+                    get: { settings.enabled },
                     set: { AppRuntime.shared.setEnabled($0) }))
                     .toggleStyle(.switch)
                     .labelsHidden()
@@ -1326,7 +1230,7 @@ struct PanelView: View {
             errorRow(state.watcherError)
             menuDivider
             featureToggle("Lock cursor to app when focused",
-                          isOn: model.jailEnabled,
+                          isOn: settings.jailEnabled,
                           failed: jailFailed,
                           held: false,
                           set: { AppRuntime.shared.setJailEnabled($0) })
@@ -1337,7 +1241,7 @@ struct PanelView: View {
             // tap-backed toggles pass held: false and disable while failed;
             // only the acceleration toggle keeps a live retry (accelHeld).
             featureToggle("Invert wheel scrolling",
-                          isOn: model.invertVertical,
+                          isOn: settings.invertVertical,
                           failed: scrollFailed,
                           held: false,
                           set: { AppRuntime.shared.setInvertVertical($0) })
@@ -1345,8 +1249,8 @@ struct PanelView: View {
             // as switches followed by dials rather than alternating.
             pointerSpeedRow
             SpeedSliderRow(title: "Scroll speed", scale: scrollSpeedScale,
-                           thousandths: model.mulThousandths,
-                           isDisabled: !state.trusted || scrollFailed || !model.enabled,
+                           thousandths: settings.mulThousandths,
+                           isDisabled: !state.trusted || scrollFailed || !settings.enabled,
                            set: { AppRuntime.shared.setMulThousandths($0) })
             menuDivider
             MenuRow(title: "Advanced", trailingSymbol: "chevron.right") {
@@ -1355,7 +1259,7 @@ struct PanelView: View {
             menuDivider
             staticRow {
                 Toggle("Launch at login", isOn: Binding(
-                    get: { model.launchAtLogin },
+                    get: { settings.launchAtLogin },
                     set: { AppRuntime.shared.setLaunchAtLogin($0) }))
                     .toggleStyle(.checkbox)
             }
@@ -1379,27 +1283,27 @@ struct PanelView: View {
             }
             menuDivider
             featureToggle("Invert horizontal scrolling",
-                          isOn: model.invertHorizontal,
+                          isOn: settings.invertHorizontal,
                           failed: scrollFailed,
                           held: false,
                           set: { AppRuntime.shared.setInvertHorizontal($0) })
             featureToggle("Flatten scroll notches",
-                          isOn: model.flattenNotches,
+                          isOn: settings.flattenNotches,
                           failed: scrollFailed,
                           held: false,
                           set: { AppRuntime.shared.setFlattenNotches($0) })
             featureToggle("Fallback trackpad detection",
-                          isOn: model.altTrackpadDetection,
+                          isOn: settings.altTrackpadDetection,
                           failed: scrollFailed,
                           held: false,
                           set: { AppRuntime.shared.setAltTrackpadDetection($0) })
-            staticRow { HotkeyRow(state: state, model: model) }
+            staticRow { HotkeyRow(state: state, settings: settings) }
             stepperRow("Lines per notch",
-                       value: model.linesPerNotch, range: 1...1000,
+                       value: settings.linesPerNotch, range: 1...1000,
                        set: { AppRuntime.shared.setLinesPerNotch($0) })
-                .disabled(!state.trusted || scrollFailed || !model.enabled)
+                .disabled(!state.trusted || scrollFailed || !settings.enabled)
             stepperRow("Corner radius",
-                       value: Int(model.cornerRadiusSetting), range: 0...200,
+                       value: Int(settings.cornerRadius), range: 0...200,
                        set: { AppRuntime.shared.setCornerRadius(Double($0)) })
                 .help("Radius of the jail's rounded corners in windowed mode; 0 disables corner clamping")
             menuDivider
@@ -1460,19 +1364,19 @@ struct PanelView: View {
         staticRow {
             Menu {
                 Picker("Application", selection: Binding(
-                    get: { model.targetBundleID },
+                    get: { settings.targetBundleID },
                     set: { tag in
                         if tag == chooseTag {
                             AppRuntime.shared.chooseTargetFromApplications()
                         } else if tag == Settings.noTarget {
                             AppRuntime.shared.setTarget(bundleID: Settings.noTarget, name: "None")
-                        } else if let row = model.pickerRows.first(where: { $0.bundleID == tag }) {
+                        } else if let row = state.pickerRows.first(where: { $0.bundleID == tag }) {
                             AppRuntime.shared.setTarget(bundleID: row.bundleID, name: row.name)
                         }
                     })) {
                     Text("None").tag(Settings.noTarget)
                     Divider()
-                    ForEach(model.pickerRows, id: \.bundleID) { row in
+                    ForEach(state.pickerRows, id: \.bundleID) { row in
                         rowLabel(row).tag(row.bundleID)
                     }
                     Divider()
@@ -1506,7 +1410,8 @@ struct PanelView: View {
     }
 
     private var selectedRow: GamePickerRow? {
-        model.pickerRows.first { $0.bundleID == model.targetBundleID }
+        let target = settings.targetBundleID
+        return state.pickerRows.first { $0.bundleID == target }
     }
 
     // Icon, name, and a marker for a closed app, which stays selectable so
@@ -1557,7 +1462,7 @@ struct PanelView: View {
     // the only retry of that restore the panel offers.
     private var accelToggle: some View {
         featureToggle("Disable mouse acceleration",
-                      isOn: model.accelOff,
+                      isOn: settings.accelerationOff,
                       failed: accelFailed,
                       unavailable: !state.trusted && !state.accelHeld,
                       held: state.accelHeld,
@@ -1581,7 +1486,7 @@ struct PanelView: View {
         // preferences are kept, and unchecked would read as cleared). The
         // one exception stays live: a failed toggle that still holds an
         // effect, whose click is the only retry of the failed release.
-        let masterOff = !model.enabled && !(failed && held)
+        let masterOff = !settings.enabled && !(failed && held)
         return staticRow {
             Toggle(title, isOn: Binding(
                 get: { isOn && !unavailable && !failed },
@@ -1597,8 +1502,8 @@ struct PanelView: View {
 
     private var pointerSpeedRow: some View {
         SpeedSliderRow(title: "Pointer speed", scale: pointerSpeedScale,
-                       thousandths: model.pointerSpeedThousandths,
-                       isDisabled: !(model.enabled && model.accelOff && state.accelHeld
+                       thousandths: settings.pointerSpeedThousandths,
+                       isDisabled: !(settings.enabled && settings.accelerationOff && state.accelHeld
                                      && state.pointerSpeedAvailable),
                        caption: pointerSpeedCaption,
                        set: { AppRuntime.shared.setPointerSpeedThousandths($0) })
@@ -1682,65 +1587,18 @@ struct PanelBackground: View {
     }
 }
 
-// Gap between the menu bar's bottom edge and the panel's top edge. Control
-// Center's modules open 1 point below the bar (measured off the Wi-Fi
-// module, macOS 26); MenuBarExtra places its `.window` 2 points below, one
-// point lower than every native panel beside it.
-let menuPanelTopGap: CGFloat = 1
-// Largest downward miss the lift corrects. Wide enough for the 1-point
-// MenuBarExtra miss with slack for a scaled display; far under the 25 or
-// more points a hidden menu bar leaves, where the placement is deliberate.
-let menuPanelMaxLift: CGFloat = 4
-
-// Window-level fixes the MenuBarExtra window needs: drops the shadow, which
-// on a dark panel paints a bright rim light along the edge that no content
-// can cover (it sits above the content view; PanelBackground's hairline
-// defines the edge instead), and lifts the window to the native gap below
-// the menu bar. The hosting view learns its window in viewDidMoveToWindow,
-// so the fixes and the observers that keep them applied hang off that.
+// Drops the MenuBarExtra window's shadow, which on a dark panel paints a
+// bright rim light along the edge that no content can cover (it sits above
+// the content view; PanelBackground's hairline defines the edge instead).
+// The hosting view learns its window in viewDidMoveToWindow.
 struct PanelWindowStyle: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { HostView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
 
     private final class HostView: NSView {
-        private var observers: [NSObjectProtocol] = []
-
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            observers.forEach(NotificationCenter.default.removeObserver)
-            observers.removeAll()
-            guard let window else { return }
-            PanelWindowStyle.style(window)
-            // MenuBarExtra re-places the window on every open, after SwiftUI's
-            // update pass, so the lift has to follow the system's own move:
-            // both notifications fire on each open, and the lift is a no-op
-            // once the window sits at the target. A nil queue runs the block
-            // inline on the posting (main) thread, inside the placement, so
-            // the panel never draws a frame at the system's gap and then
-            // steps up.
-            let names = [NSWindow.didMoveNotification, NSWindow.didChangeOcclusionStateNotification]
-            for name in names {
-                observers.append(NotificationCenter.default.addObserver(
-                    forName: name, object: window, queue: nil) { [weak window] _ in
-                        if let window { PanelWindowStyle.style(window) }
-                    })
-            }
-        }
-
-        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
-    }
-
-    private static func style(_ window: NSWindow) {
-        if window.hasShadow { window.hasShadow = false }
-        // visibleFrame's top is the menu bar's bottom edge on the window's own
-        // screen. Only a downward miss is corrected: never push a panel the
-        // system deliberately placed lower (a screen whose top is not the bar).
-        // The half-point dead band keeps a backing-store-rounded landing from
-        // re-arming the didMove handler forever.
-        guard let screen = window.screen else { return }
-        let lift = screen.visibleFrame.maxY - menuPanelTopGap - window.frame.maxY
-        if lift > 0.5, lift < menuPanelMaxLift {
-            window.setFrameOrigin(NSPoint(x: window.frame.minX, y: window.frame.minY + lift))
+            window?.hasShadow = false
         }
     }
 }
@@ -1821,16 +1679,15 @@ struct MenuRow: View {
 
 // MARK: - Hotkey recorder
 
-// The jail toggle hotkey row. Mechanism 1 is a local
-// keyDown monitor installed while recording; mechanism 2 is the first-
-// responder KeyCaptureNSView sitting invisibly in the row, armed on the same
-// flag. Whichever fires first wins via the single handle() path. Two rules
-// hold on every exit: recording cancels keeping the previous chord when the
-// panel dismisses (onDisappear), and the monitor and responder are torn down
-// on that same path, so a dismissed panel leaves nothing capturing keys.
+// The jail toggle hotkey row. A local keyDown monitor, installed while
+// recording, sees every key event before sendEvent dispatches it (command
+// chords included, ahead of any key equivalent). Two rules hold on every
+// exit: recording cancels keeping the previous chord when the panel
+// dismisses (onDisappear), and the monitor is torn down on that same path,
+// so a dismissed panel leaves nothing capturing keys.
 struct HotkeyRow: View {
     @ObservedObject var state: AppState
-    @ObservedObject var model: SettingsModel
+    @ObservedObject var settings: Settings
     @State private var recording = false
     @State private var monitor: Any?
 
@@ -1841,15 +1698,13 @@ struct HotkeyRow: View {
                 Text("in use by another app").font(.caption).foregroundStyle(.red)
             }
             Spacer()
-            KeyCapture(recording: recording, onKey: handle)
-                .frame(width: 0, height: 0)
             Button {
                 recording ? stopRecording() : startRecording()
             } label: {
                 Text(recording
                         ? "Press keys…"
-                        : hotkeyChordLabel(keyCode: model.hotkeyKeyCode,
-                                           modifiers: model.hotkeyModifiers))
+                        : hotkeyChordLabel(keyCode: settings.hotkeyKeyCode,
+                                           modifiers: settings.hotkeyModifiers))
                     .monospacedDigit()
                     .lineLimit(1)
                     .padding(.horizontal, 6)
@@ -1895,26 +1750,5 @@ struct HotkeyRow: View {
         AppRuntime.shared.setHotkey(keyCode: Int(event.keyCode), modifiers: mods)
         stopRecording()
         return true
-    }
-}
-
-// SwiftUI host for mechanism 2's NSView. Arming takes first responder on the
-// next runloop turn because the view may not be in a window yet on the first
-// update; disarming returns key focus to the window.
-struct KeyCapture: NSViewRepresentable {
-    let recording: Bool
-    let onKey: (NSEvent) -> Bool
-
-    func makeNSView(context: Context) -> KeyCaptureNSView { KeyCaptureNSView() }
-
-    func updateNSView(_ view: KeyCaptureNSView, context: Context) {
-        view.onKey = onKey
-        if recording {
-            DispatchQueue.main.async {
-                view.window?.makeFirstResponder(view)
-            }
-        } else if view.window?.firstResponder === view {
-            view.window?.makeFirstResponder(nil)
-        }
     }
 }

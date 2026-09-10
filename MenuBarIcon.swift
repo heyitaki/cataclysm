@@ -48,7 +48,8 @@ func makeMenuBarIcon(_ state: MenuBarIconState) -> NSImage {
             NSPoint(x: 7, y: 11.5), NSPoint(x: 12, y: 11.5),
         ]
         let scale: CGFloat = 9.5 / 19
-        let centroid = polygonCentroid(outline)
+        // Area centroid of the outline (shoelace formula), precomputed.
+        let centroid = NSPoint(x: 4.3035, y: 9.7691)
         let origin = NSPoint(x: center.x - centroid.x * scale,
                              y: center.y - centroid.y * scale)
         let arrow = NSBezierPath()
@@ -65,18 +66,4 @@ func makeMenuBarIcon(_ state: MenuBarIconState) -> NSImage {
     // supplies one for VoiceOver.
     image.accessibilityDescription = "Cataclysm"
     return image
-}
-
-// Area centroid of a simple polygon (shoelace formula).
-private func polygonCentroid(_ points: [NSPoint]) -> NSPoint {
-    var area: CGFloat = 0, cx: CGFloat = 0, cy: CGFloat = 0
-    for i in points.indices {
-        let p = points[i], q = points[(i + 1) % points.count]
-        let cross = p.x * q.y - q.x * p.y
-        area += cross
-        cx += (p.x + q.x) * cross
-        cy += (p.y + q.y) * cross
-    }
-    area /= 2
-    return NSPoint(x: cx / (6 * area), y: cy / (6 * area))
 }

@@ -1,7 +1,7 @@
 // Harness for the watcher primitives (Watcher.swift): the poll loop's
-// release decision including the startup case, the registration plan, and
-// the legacy LaunchAgents plist round-trip. Pure
-// functions; no launchd, no files, no system state.
+// release decision including the startup case, the registration plan, the
+// launchctl-output spawn check, and the legacy LaunchAgents plist
+// round-trip. Pure functions; no launchd, no files, no system state.
 //
 // Build and run: make test
 
@@ -28,7 +28,7 @@ struct WatcherTests {
         releaseTests()
         presenceTests()
         registrationPlanTests()
-        derivationTests()
+        spawnResolutionTests()
         legacyPlistTests()
         print("\(passed) passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
@@ -136,22 +136,54 @@ struct WatcherTests {
                 "version change with the legacy job holding the label: unregister then register")
     }
 
-    // The runtime and the smoke gate both consume these; a drift here would
-    // let the gate validate a different job than the app registers.
-    static func derivationTests() {
-        checkEq(watcherJobLabel(bundleID: "io.github.heyitaki.cataclysm"),
-                "io.github.heyitaki.cataclysm.watch",
-                "label derives from the bundle id")
-        checkEq(legacyWatcherPlistLocation(
-                    home: URL(fileURLWithPath: "/Users/friend"),
-                    bundleID: "io.github.heyitaki.cataclysm").path,
-                "/Users/friend/Library/LaunchAgents/"
-                    + "io.github.heyitaki.cataclysm.watch.plist",
-                "legacy plist lives in the user's LaunchAgents")
-        checkEq(watcherExecutable(
-                    inBundle: URL(fileURLWithPath: "/Applications/Cataclysm.app")),
-                "/Applications/Cataclysm.app/Contents/MacOS/cataclysm",
-                "executable path points inside the bundle")
+    static func spawnResolutionTests() {
+        // The label is what the bundled plist's Label key must match.
+        checkEq(watcherLabel, "io.github.heyitaki.cataclysm.watch", "watcher label")
+        checkEq(watcherPlistName, "io.github.heyitaki.cataclysm.watch.plist", "plist name")
+        let exec = "/Applications/Cataclysm.app/Contents/MacOS/cataclysm"
+        let loadedOnly = """
+        io.github.heyitaki.cataclysm.watch = {
+        \targuments = {
+        \t\t\(exec)
+        \t\t--watch
+        \t}
+        \tstate = not running
+        }
+        """
+        let running = loadedOnly.replacingOccurrences(
+            of: "state = not running", with: "pid = 512")
+        checkEq(launchctlPidResolvesExecutable(loadedOnly, executablePath: exec,
+                                               pathForPid: { _ in exec }),
+                false, "the absolute path alone does not prove a spawn")
+        checkEq(launchctlPidResolvesExecutable(running, executablePath: exec,
+                                               pathForPid: { $0 == 512 ? exec : nil }),
+                true, "a live pid running the in-bundle executable resolves")
+        checkEq(launchctlPidResolvesExecutable(running, executablePath: exec,
+                                               pathForPid: { _ in "/usr/bin/true" }),
+                false, "a pid running something else does not resolve")
+        checkEq(launchctlPidResolvesExecutable(running, executablePath: exec,
+                                               pathForPid: { _ in nil }),
+                false, "an unreadable pid path does not resolve")
+        checkEq(launchctlPidResolvesExecutable(running, executablePath: "",
+                                               pathForPid: { _ in "" }),
+                false, "empty expected path never resolves")
+
+        let dump = """
+        io.github.heyitaki.cataclysm.watch = {
+        \tactive count = 1
+        \tstate = running
+        \tprogram identifier = Contents/MacOS/cataclysm (mode: 2)
+        \tpid = 4821
+        }
+        """
+        checkEq(launchctlPid(inOutput: dump), 4821, "pid line parses")
+        checkEq(launchctlPid(inOutput: "\tpid = 4821 (spawned)"), 4821,
+                "annotated pid line still parses the leading digits")
+        checkEq(launchctlPid(inOutput: "state = not running"), nil,
+                "no pid line reads as no process")
+        checkEq(launchctlPid(inOutput: "\tpid = junk"), nil,
+                "non-numeric pid reads as no process")
+        checkEq(launchctlPid(inOutput: ""), nil, "empty output has no pid")
     }
 
     static func legacyPlistTests() {

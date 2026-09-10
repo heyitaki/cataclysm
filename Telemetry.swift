@@ -109,13 +109,17 @@ final class Telemetry {
         return true
     }
 
-    // YYYY-MM-DD in UTC, the zone Analytics Engine stamps pings in, so the
-    // cohort week stats.sh derives from it lines up with the ping weeks.
+    // YYYY-MM-DD in UTC (the formatter's default zone), the zone Analytics
+    // Engine stamps pings in, so the cohort week stats.sh derives from it
+    // lines up with the ping weeks.
+    private static let dayFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        return f
+    }()
+
     static func dayString(_ date: Date) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let parts = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+        dayFormatter.string(from: date)
     }
 }
 

@@ -12,10 +12,17 @@
 // deliberately absent from Key.all, so resetToDefaults() can never erase the
 // only record of the user's real acceleration value while the live property
 // is held by the app.
+//
+// The panel observes this object directly: every preference setter publishes
+// before it writes, so a control never shows a value that did not reach
+// storage. The telemetry bookkeeping setters stay silent; nothing binds them.
 
+import Combine
 import Foundation
 
-final class Settings {
+final class Settings: ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+
     enum Key {
         static let enabled = "app.enabled"
         static let jailEnabled = "jail.enabled"
@@ -120,6 +127,12 @@ final class Settings {
         return value
     }
 
+    // Preference writes publish first, so SwiftUI re-reads after the write.
+    private func store(_ value: Any, forKey key: String) {
+        objectWillChange.send()
+        defaults.set(value, forKey: key)
+    }
+
     // Optional bookkeeping values: nil removes the key rather than storing a
     // null, so "absent" has one representation.
     private func setOrRemove(_ value: Any?, forKey key: String) {
@@ -136,32 +149,32 @@ final class Settings {
     // acceleration) while the app keeps running and keeps its settings.
     var enabled: Bool {
         get { bool(Key.enabled, or: true) }
-        set { defaults.set(newValue, forKey: Key.enabled) }
+        set { store(newValue, forKey: Key.enabled) }
     }
 
     var jailEnabled: Bool {
         get { bool(Key.jailEnabled, or: true) }
-        set { defaults.set(newValue, forKey: Key.jailEnabled) }
+        set { store(newValue, forKey: Key.jailEnabled) }
     }
 
     var targetBundleID: String {
         get { nonEmptyOptional(Key.targetBundleID) ?? Default.targetBundleID }
-        set { defaults.set(newValue, forKey: Key.targetBundleID) }
+        set { store(newValue, forKey: Key.targetBundleID) }
     }
 
     var targetDisplayName: String {
         get { nonEmptyOptional(Key.targetDisplayName) ?? Default.targetDisplayName }
-        set { defaults.set(newValue, forKey: Key.targetDisplayName) }
+        set { store(newValue, forKey: Key.targetDisplayName) }
     }
 
     var cornerRadius: Double {
         get { clampedCornerRadius(finiteDoubleOptional(Key.cornerRadius) ?? Default.cornerRadius) }
-        set { defaults.set(clampedCornerRadius(newValue), forKey: Key.cornerRadius) }
+        set { store(clampedCornerRadius(newValue), forKey: Key.cornerRadius) }
     }
 
     var accelerationOff: Bool {
         get { bool(Key.accelerationOff, or: true) }
-        set { defaults.set(newValue, forKey: Key.accelerationOff) }
+        set { store(newValue, forKey: Key.accelerationOff) }
     }
 
     var pointerSpeedThousandths: Int {
@@ -170,39 +183,39 @@ final class Settings {
                 int(Key.pointerSpeedThousandths, or: Default.pointerSpeedThousandths))
         }
         set {
-            defaults.set(clampedPointerSpeedThousandths(newValue),
+            store(clampedPointerSpeedThousandths(newValue),
                          forKey: Key.pointerSpeedThousandths)
         }
     }
 
     var invertVertical: Bool {
         get { bool(Key.invertVertical, or: true) }
-        set { defaults.set(newValue, forKey: Key.invertVertical) }
+        set { store(newValue, forKey: Key.invertVertical) }
     }
 
     var invertHorizontal: Bool {
         get { bool(Key.invertHorizontal, or: true) }
-        set { defaults.set(newValue, forKey: Key.invertHorizontal) }
+        set { store(newValue, forKey: Key.invertHorizontal) }
     }
 
     var flattenNotches: Bool {
         get { bool(Key.flattenNotches, or: true) }
-        set { defaults.set(newValue, forKey: Key.flattenNotches) }
+        set { store(newValue, forKey: Key.flattenNotches) }
     }
 
     var linesPerNotch: Int {
         get { clampedLinesPerNotch(int(Key.linesPerNotch, or: Default.linesPerNotch)) }
-        set { defaults.set(clampedLinesPerNotch(newValue), forKey: Key.linesPerNotch) }
+        set { store(clampedLinesPerNotch(newValue), forKey: Key.linesPerNotch) }
     }
 
     var mulThousandths: Int {
         get { clampedMulThousandths(int(Key.mulThousandths, or: Default.mulThousandths)) }
-        set { defaults.set(clampedMulThousandths(newValue), forKey: Key.mulThousandths) }
+        set { store(clampedMulThousandths(newValue), forKey: Key.mulThousandths) }
     }
 
     var altTrackpadDetection: Bool {
         get { bool(Key.altTrackpadDetection, or: false) }
-        set { defaults.set(newValue, forKey: Key.altTrackpadDetection) }
+        set { store(newValue, forKey: Key.altTrackpadDetection) }
     }
 
     // The chord validates as a pair (Hotkey.swift's isValidStoredHotkey): a
@@ -220,12 +233,12 @@ final class Settings {
 
     var hotkeyKeyCode: Int {
         get { storedHotkey.keyCode }
-        set { defaults.set(newValue, forKey: Key.hotkeyKeyCode) }
+        set { store(newValue, forKey: Key.hotkeyKeyCode) }
     }
 
     var hotkeyModifiers: Int {
         get { storedHotkey.modifiers }
-        set { defaults.set(newValue, forKey: Key.hotkeyModifiers) }
+        set { store(newValue, forKey: Key.hotkeyModifiers) }
     }
 
     // Ships checked: the app
@@ -234,7 +247,7 @@ final class Settings {
     // SMAppService.mainApp registration is the consumer's job.
     var launchAtLogin: Bool {
         get { bool(Key.launchAtLogin, or: true) }
-        set { defaults.set(newValue, forKey: Key.launchAtLogin) }
+        set { store(newValue, forKey: Key.launchAtLogin) }
     }
 
     // nil until the first successful watcher registration records a version;
@@ -294,6 +307,7 @@ final class Settings {
     // (holding acceleration off at the default speed again) is the
     // caller's job; this store only owns persistence.
     func resetToDefaults() {
+        objectWillChange.send()
         for key in Key.all {
             defaults.removeObject(forKey: key)
         }

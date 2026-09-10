@@ -82,18 +82,6 @@ function versionFromTag(tag) {
 }
 
 /**
- * @param {Release} release
- * @param {string} name
- * @returns {ReleaseAsset | undefined}
- */
-function findAsset(release, name) {
-  const assets = Array.isArray(release.assets) ? release.assets : [];
-  // Only the exact name counts: several assets can match `Cataclysm-*.dmg`, and
-  // the one whose version equals the tag is the release's own build.
-  return assets.find((asset) => asset && asset.name === name);
-}
-
-/**
  * @param {string} url
  * @returns {Response}
  */
@@ -111,24 +99,7 @@ function redirect(url) {
  * @returns {Response}
  */
 function methodNotAllowed(allow) {
-  return new Response("Method Not Allowed", {
-    status: 405,
-    headers: { Allow: allow },
-  });
-}
-
-/**
- * @returns {Response}
- */
-function badRequest() {
-  return new Response("Bad Request", { status: 400 });
-}
-
-/**
- * @returns {Response}
- */
-function noContent() {
-  return new Response(null, { status: 204 });
+  return new Response("Method Not Allowed", { status: 405, headers: { Allow: allow } });
 }
 
 /**
@@ -294,8 +265,11 @@ export function makeHandler({ fetch, now }) {
     if (!release) return redirect(NO_BUILD_URL);
 
     const version = versionFromTag(release.tag_name);
-    const asset = findAsset(release, `Cataclysm-${version}.dmg`);
-    if (!asset || !asset.browser_download_url) return redirect(NO_BUILD_URL);
+    // Only the exact name counts: several assets can match `Cataclysm-*.dmg`,
+    // and the one whose version equals the tag is the release's own build.
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const asset = assets.find((a) => a?.name === `Cataclysm-${version}.dmg`);
+    if (!asset?.browser_download_url) return redirect(NO_BUILD_URL);
 
     // Only a GET is a download. HEAD is what link previews, uptime probes and
     // link checkers send, and none of them fetch the image.
@@ -340,16 +314,16 @@ export function makeHandler({ fetch, now }) {
     // skips the preflight, so without this any web page could turn its
     // visitors into heartbeat writers. URLSession sends no Origin, so a real
     // heartbeat is unaffected.
-    if (request.headers.has("origin")) return badRequest();
+    if (request.headers.has("origin")) return new Response("Bad Request", { status: 400 });
 
     // The kill switch stops collection without touching /download, and answers
     // before the body is read so a flood costs nothing. The app cannot tell
     // this apart from an accepted heartbeat, which is the point: it must not
     // retry, and it must not learn that collection is off.
-    if (env.PING_ENABLED !== "true") return noContent();
+    if (env.PING_ENABLED !== "true") return new Response(null, { status: 204 });
 
     const row = pingRow(await readJson(request, PING_MAX_BYTES));
-    if (!row) return badRequest();
+    if (!row) return new Response("Bad Request", { status: 400 });
 
     try {
       env.PINGS.writeDataPoint(row);
@@ -357,7 +331,7 @@ export function makeHandler({ fetch, now }) {
       // Same rule as countDownload: a dropped row beats a 500 the app would
       // ignore anyway.
     }
-    return noContent();
+    return new Response(null, { status: 204 });
   }
 
   return async function handle(request, env) {

@@ -1,10 +1,7 @@
-// The AppKit/Carbon half of the jail toggle hotkey: global registration via
-// RegisterEventHotKey, and the mechanism-2 capture view for the recorder.
-// Mechanism 1 (the local keyDown monitor) lives with the recorder row's view
-// state in CataclysmApp.swift. Both feed the same capture closure and the
-// first to fire wins.
+// The Carbon half of the jail toggle hotkey: global registration via
+// RegisterEventHotKey. The recorder's local keyDown monitor lives with the
+// row's view state in CataclysmApp.swift.
 
-import AppKit
 import Carbon.HIToolbox
 
 // Registers the stored chord with the window server and fires a callback on
@@ -61,22 +58,5 @@ final class HotkeyCenter {
                 .takeUnretainedValue().onHotkey?()
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handlerRef)
-    }
-}
-
-// Mechanism 2: a first-responder NSView that captures chords the responder
-// chain would otherwise route to a menu. keyDown catches plain keys,
-// performKeyEquivalent catches command chords. The closure returns true when
-// it consumed the event.
-final class KeyCaptureNSView: NSView {
-    var onKey: ((NSEvent) -> Bool)?
-    override var acceptsFirstResponder: Bool { true }
-
-    override func keyDown(with event: NSEvent) {
-        if onKey?(event) != true { super.keyDown(with: event) }
-    }
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        onKey?(event) ?? false
     }
 }
